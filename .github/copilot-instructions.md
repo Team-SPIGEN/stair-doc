@@ -1,28 +1,143 @@
-# Robot Delivery Control App - Copilot Instructions
+# Stair-Doc: Robot Delivery Control App - Copilot Instructions
 
 > **Single source of truth for all AI-assisted code generation in this monorepo.**
 
 ## Project Overview
 
-This is a **robot delivery control application** built as a **Progressive Web App (PWA)** with:
+**Stair-Doc** is an autonomous stair-climbing delivery robot application for office file/container delivery between floors. The robot uses 2D LIDAR SLAM for mapping and navigation, can climb stairs using tracked chassis with servo arms, and secures deliveries with RFID-locked containers.
 
-- **Frontend:** Next.js 16 + React 18 + TypeScript + Tailwind CSS
-- **Backend:** FastAPI + Python 3.10+ + Pydantic
+### Tech Stack
+
+- **Frontend:** Next.js 15 (App Router) + React 18 + TypeScript + Tailwind CSS + shadcn/ui
+- **Backend:** FastAPI + Python 3.10+ + Pydantic + PostgreSQL
 - **Monorepo:** Turborepo + pnpm workspaces
-- **Real-time:** Socket.IO for robot telemetry and delivery updates
+- **Real-time:** Socket.IO / WebSocket for robot telemetry, RFID events, camera streams
 - **PWA:** Installable on mobile devices, offline support, push notifications
+- **Deployment:** Vercel (frontend) + Railway (backend)
+
+### Robot Hardware
+
+| Component      | Model                                | Purpose                                           |
+| -------------- | ------------------------------------ | ------------------------------------------------- |
+| **Computer**   | Raspberry Pi 4 + Ubuntu + ROS2       | Main controller                                   |
+| **Navigation** | 2D LIDAR                             | SLAM mapping, stair detection, obstacle avoidance |
+| **Security**   | RFID RC522                           | Container lock/unlock authentication              |
+| **Camera**     | Pi Camera v1.3                       | Recipient photo verification                      |
+| **Audio**      | INMP441 Microphone                   | Voice commands                                    |
+| **Weight**     | Load Cells                           | Payload weight monitoring                         |
+| **Mobility**   | Tracked chassis + MG90S/MG995 servos | Stair climbing (4 servo arms)                     |
 
 ### Target Platforms
 
 - **Primary:** Mobile phones (iOS Safari, Android Chrome) via PWA
-- **Secondary:** Desktop browsers (Chrome, Firefox, Safari, Edge)
+- **Secondary:** Tablets and Desktop browsers (Chrome, Firefox, Safari, Edge)
 
 ### Design Philosophy
 
 - **Mobile-first:** Design for small screens first, then scale up
 - **Touch-optimized:** Large tap targets (min 44x44px), swipe gestures
-- **Offline-capable:** Core features work without internet
+- **Offline-capable:** Core features work without internet (offline delivery queue)
 - **Battery-efficient:** Minimize background processing on mobile
+- **Real-time focus:** Live telemetry, instant RFID feedback, streaming camera
+
+---
+
+## User Types & Features
+
+### 1. Operators (Delivery Managers)
+
+Primary users who manage the robot and delivery queue:
+
+| Feature            | Description                                           |
+| ------------------ | ----------------------------------------------------- |
+| **Live Dashboard** | Real-time battery, location, SLAM pose visualization  |
+| **Delivery Queue** | Full CRUD operations for delivery management          |
+| **Manual Control** | Joystick-style navigation for manual override         |
+| **Emergency Stop** | Instant robot halt with confirmation                  |
+| **Alerts**         | Push notifications for low battery, obstacles, errors |
+
+### 2. Recipients (Office Staff)
+
+End users who receive deliveries:
+
+| Feature                 | Description                                |
+| ----------------------- | ------------------------------------------ |
+| **RFID Unlock**         | Tap RFID card/tag to unlock container      |
+| **Camera Verification** | Live camera feed for identity confirmation |
+| **Delivery Tracking**   | Real-time status updates with ETA          |
+| **Photo Confirmation**  | Capture proof of delivery receipt          |
+
+### 3. Admins (Building Managers)
+
+System administrators with full control:
+
+| Feature             | Description                                       |
+| ------------------- | ------------------------------------------------- |
+| **RFID Management** | Register, assign, revoke RFID tags                |
+| **User Management** | Create users, assign roles, set permissions       |
+| **Analytics**       | Delivery statistics, robot utilization reports    |
+| **Robot Config**    | Speed limits, no-go zones, maintenance scheduling |
+
+---
+
+## Core Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. OPERATOR: Create Delivery                                   │
+│     └─ Assign RFID tag → Set destination floor → Dispatch robot │
+├─────────────────────────────────────────────────────────────────┤
+│  2. ROBOT: Autonomous Navigation                                │
+│     └─ LIDAR SLAM → Path planning → Stair climbing → Arrival    │
+├─────────────────────────────────────────────────────────────────┤
+│  3. RECIPIENT: Receive Delivery                                 │
+│     └─ Tap RFID → Container unlocks → Confirm via camera        │
+├─────────────────────────────────────────────────────────────────┤
+│  4. ROBOT: Return to Base                                       │
+│     └─ Navigate back → Operator archives delivery               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Data Flow Architecture
+
+```
+┌──────────────────┐    WebSocket     ┌──────────────────┐    REST/WS    ┌──────────────────┐
+│   ROBOT (Pi 4)   │ ───────────────► │   BACKEND API    │ ◄───────────► │   FRONTEND PWA   │
+│                  │                  │                  │               │                  │
+│  ├─ LIDAR Pose   │  robot_telemetry │  ├─ Socket.IO    │               │  ├─ Dashboard    │
+│  ├─ Camera MJPEG │  ─────────────►  │  ├─ PostgreSQL   │               │  ├─ Map View     │
+│  ├─ RFID Events  │  rfid_scan       │  ├─ Auth/JWT     │               │  ├─ Controls     │
+│  ├─ IMU Data     │  ─────────────►  │  └─ Push Notif   │               │  └─ Notifications│
+│  └─ Load Cells   │  delivery_update │                  │               │                  │
+└──────────────────┘                  └──────────────────┘               └──────────────────┘
+```
+
+### Socket Events
+
+| Event             | Direction                  | Data                          | Description            |
+| ----------------- | -------------------------- | ----------------------------- | ---------------------- |
+| `robot_telemetry` | Robot → Backend → Frontend | Position, battery, speed, IMU | Real-time robot state  |
+| `lidar_map`       | Robot → Backend → Frontend | Occupancy grid, pose          | SLAM visualization     |
+| `rfid_scan`       | Robot → Backend → Frontend | Tag ID, timestamp, location   | RFID tap events        |
+| `camera_frame`    | Robot → Backend → Frontend | MJPEG frame / Base64          | Live video stream      |
+| `delivery_update` | Backend → Frontend         | Status, ETA, location         | Delivery state changes |
+| `robot_command`   | Frontend → Backend → Robot | Action, parameters            | Control commands       |
+| `emergency_stop`  | Frontend → Backend → Robot | -                             | Immediate halt         |
+
+---
+
+## PWA Capabilities
+
+| Feature                | Implementation                                        |
+| ---------------------- | ----------------------------------------------------- |
+| **Installable**        | Web App Manifest with icons, splash screens           |
+| **Offline Queue**      | IndexedDB for pending deliveries when offline         |
+| **Push Notifications** | FCM/Web Push for delivery ready, alerts               |
+| **Background Sync**    | Sync offline actions when connection restored         |
+| **Responsive**         | Mobile-first Tailwind with tablet/desktop breakpoints |
+| **Camera Access**      | MediaDevices API for recipient photo capture          |
 
 ---
 
