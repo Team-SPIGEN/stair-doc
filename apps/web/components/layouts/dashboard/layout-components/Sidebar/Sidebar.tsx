@@ -1,5 +1,4 @@
 "use client";
-import { useEffect } from "react";
 import { useState } from "react";
 import Link from "next/link";
 import { Icons } from "@/components/icons";
@@ -7,17 +6,15 @@ import { motion } from "framer-motion";
 import NavLinks from "./NavLinks";
 
 const Sidebar = () => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window !== "undefined") {
+      const collapsedState = localStorage.getItem("sidebarCollapsed");
+      return collapsedState === "true";
+    }
+    return false;
+  });
   const animationDuration = 0.4;
   const sideBarWidth = "250px";
-
-  // Load collapsed state from localStorage on component mount
-  useEffect(() => {
-    const collapsedState = localStorage.getItem("sidebarCollapsed");
-    if (collapsedState !== null) {
-      setCollapsed(collapsedState === "true" ? true : false);
-    }
-  }, []);
 
   const handleClose = () => {
     localStorage.setItem("sidebarCollapsed", (!collapsed).toString());

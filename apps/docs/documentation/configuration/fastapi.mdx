@@ -169,7 +169,7 @@ Specific CRUD operations can be created for each endpoint. However, generic CRUD
     <Step title="Create CRUD file">
     ```python src/crud/crud_spell.py
     from fastapi import HTTPException
-    from supabase_py_async import AsyncClient
+    from supabase import AsyncClient
 
     from src.crud.base import CRUDBase
     from src.schemas import Spell, SpellCreate, SpellUpdate

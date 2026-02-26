@@ -2,7 +2,7 @@
     "name": "api",
     "version": "0.0.0",
     "scripts": {
-        "dev": "python run.py",
+        "dev": ".venv/bin/python3 run.py",
         "generate:requirements": "poetry export --without-hashes --format=requirements.txt > requirements.txt"
     }
 }

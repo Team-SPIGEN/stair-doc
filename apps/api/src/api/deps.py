@@ -1,8 +1,8 @@
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
-from supabase_py_async import AsyncClient, create_client
-from supabase_py_async.lib.client_options import ClientOptions
+from supabase import create_async_client, AsyncClient
+from supabase.lib.client_options import AsyncClientOptions
 
 from src.config import settings
 
@@ -10,10 +10,10 @@ from src.config import settings
 async def get_db() -> AsyncClient:
     client: AsyncClient | None = None
     try:
-        client = await create_client(
+        client = await create_async_client(
             settings.DB_URL,
             settings.DB_API_KEY,
-            options=ClientOptions(
+            options=AsyncClientOptions(
                 postgrest_client_timeout=10, storage_client_timeout=10
             ),
         )

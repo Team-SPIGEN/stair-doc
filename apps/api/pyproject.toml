@@ -5,19 +5,19 @@ description = ""
 authors = ["cording12 <joncording12@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.9"
-fastapi = "^0.109.2"
-uvicorn = "^0.27.1"
-email-validator = "^2.1.0"
-pydantic-settings = "^2.2.1"
-python-dotenv = "^1.0.1"
-supabase-py-async = "^2.5.5"
+python = "^3.10"
+fastapi = "^0.115.0"
+uvicorn = "^0.34.0"
+email-validator = "^2.3.0"
+pydantic-settings = "^2.7.0"
+python-dotenv = "^1.2.1"
+supabase = "^2.15.0"
 
-[tool.poetry.dev-dependencies]
-isort = "^5.10.1"
-black = "^22.6.0"
-pytest = "^8.0.1"
-pylint-pydantic = "^0.3.2"
+[tool.poetry.group.dev.dependencies]
+isort = "^5.13.2"
+black = "^24.10.0"
+pytest = "^8.4.2"
+pylint-pydantic = "^0.4.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

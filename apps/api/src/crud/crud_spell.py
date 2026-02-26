@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import HTTPException
-from supabase_py_async import AsyncClient
+from supabase import AsyncClient
 
 from src.crud.base import CRUDBase
 from src.schemas import Spell, SpellCreate, SpellUpdate

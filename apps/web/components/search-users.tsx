@@ -201,7 +201,8 @@ export default function SearchUsers() {
       {/* This can be handled better to understand what type of error is occurring rather than just a blanket handler */}
       {error ? (
         <div>
-          Couldn't find any results that match your criteria. Please try again.
+          Couldn&apos;t find any results that match your criteria. Please try
+          again.
         </div>
       ) : null}
     </div>
