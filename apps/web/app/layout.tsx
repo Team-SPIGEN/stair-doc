@@ -1,11 +1,12 @@
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter as FontSans } from "next/font/google";
 import { DashboardLayout } from "@/components/layouts/dashboard";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { OpenAPI } from "@/lib/api/client";
 import { TailwindIndicator } from "@/components/tailwind-indicator";
+import { OfflineIndicator } from "@/components/ui/offline-indicator";
 
 export const fontSans = FontSans({
   subsets: ["latin"],
@@ -18,11 +19,34 @@ if (process.env.NODE_ENV === "production") {
 
 console.log("Using OpenAPI.base", OpenAPI.BASE);
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+};
+
 export const metadata: Metadata = {
-  title: "Next-Fast-Turbo",
-  description: "A Next.js, FastAPI and Turbo project scaffold",
+  title: "Stair-Doc | Robot Delivery Control",
+  description: "Real-time monitoring and control dashboard for stair-climbing delivery robots",
+  applicationName: "Stair-Doc",
+  manifest: "/manifest.json",
   icons: {
     icon: ["/favicon.png"],
+    apple: ["/apple-touch-icon.png"],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Stair-Doc",
+  },
+  formatDetection: {
+    telephone: false,
   },
 };
 
@@ -40,6 +64,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <OfflineIndicator />
           <DashboardLayout>{children}</DashboardLayout>
           <TailwindIndicator />
         </ThemeProvider>

@@ -1,6 +1,9 @@
 from fastapi import APIRouter
-from src.api.api_v1.endpoints import users, spells
 
 api_router = APIRouter()
-api_router.include_router(users.router, prefix="/users", tags=["users"], responses={404: {"description": "Not found"}})
-api_router.include_router(spells.router, prefix="/spells", tags=["spells"], responses={404: {"description": "Not found"}})
+
+# Stair-Doc endpoints will be added here
+# Example:
+# from src.api.api_v1.endpoints import robots, deliveries
+# api_router.include_router(robots.router, prefix="/robots", tags=["robots"])
+# api_router.include_router(deliveries.router, prefix="/deliveries", tags=["deliveries"])

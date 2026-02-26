@@ -1,11 +1,9 @@
-import { CardsStats } from "./placeholder-stats";
-import SearchUsers from "@/components/search-users";
+import { StairDocDashboard } from "@/components/dashboard";
 
-export default async function Page() {
+export default function Page() {
   return (
-    <div className="flex flex-col gap-4">
-      <CardsStats />
-      <SearchUsers />
+    <div className="container mx-auto py-6 px-4 sm:px-6 lg:px-8">
+      <StairDocDashboard />
     </div>
   );
 }

@@ -4,11 +4,25 @@
 
 ## Project Overview
 
-This is a **robot delivery control application** built with:
+This is a **robot delivery control application** built as a **Progressive Web App (PWA)** with:
+
 - **Frontend:** Next.js 16 + React 18 + TypeScript + Tailwind CSS
 - **Backend:** FastAPI + Python 3.10+ + Pydantic
 - **Monorepo:** Turborepo + pnpm workspaces
 - **Real-time:** Socket.IO for robot telemetry and delivery updates
+- **PWA:** Installable on mobile devices, offline support, push notifications
+
+### Target Platforms
+
+- **Primary:** Mobile phones (iOS Safari, Android Chrome) via PWA
+- **Secondary:** Desktop browsers (Chrome, Firefox, Safari, Edge)
+
+### Design Philosophy
+
+- **Mobile-first:** Design for small screens first, then scale up
+- **Touch-optimized:** Large tap targets (min 44x44px), swipe gestures
+- **Offline-capable:** Core features work without internet
+- **Battery-efficient:** Minimize background processing on mobile
 
 ---
 
@@ -69,22 +83,22 @@ next-fast-turbo/
 
 ## 2. Naming Conventions
 
-| Type | Convention | Example |
-|------|------------|---------|
-| **Files (components)** | kebab-case | `robot-status-card.tsx` |
-| **Files (utils)** | kebab-case | `format-delivery.ts` |
-| **React Components** | PascalCase | `RobotStatusCard` |
-| **Functions/Variables** | camelCase | `getRobotStatus`, `isDelivering` |
-| **Constants** | SCREAMING_SNAKE | `MAX_BATTERY_LEVEL`, `API_BASE_URL` |
-| **TypeScript Interfaces** | PascalCase with `I` prefix optional | `Delivery`, `RobotTelemetry` |
-| **TypeScript Types** | PascalCase | `DeliveryStatus` |
-| **Python files** | snake_case | `robot_status.py` |
-| **Python classes** | PascalCase | `RobotStatusResponse` |
-| **Python functions** | snake_case | `get_robot_status` |
-| **API endpoints** | kebab-case | `/api/v1/robot-status` |
-| **Socket events** | snake_case | `robot_telemetry`, `delivery_update` |
-| **Database tables** | snake_case plural | `deliveries`, `robots` |
-| **Environment vars** | SCREAMING_SNAKE | `SUPABASE_URL`, `API_SECRET_KEY` |
+| Type                      | Convention                          | Example                              |
+| ------------------------- | ----------------------------------- | ------------------------------------ |
+| **Files (components)**    | kebab-case                          | `robot-status-card.tsx`              |
+| **Files (utils)**         | kebab-case                          | `format-delivery.ts`                 |
+| **React Components**      | PascalCase                          | `RobotStatusCard`                    |
+| **Functions/Variables**   | camelCase                           | `getRobotStatus`, `isDelivering`     |
+| **Constants**             | SCREAMING_SNAKE                     | `MAX_BATTERY_LEVEL`, `API_BASE_URL`  |
+| **TypeScript Interfaces** | PascalCase with `I` prefix optional | `Delivery`, `RobotTelemetry`         |
+| **TypeScript Types**      | PascalCase                          | `DeliveryStatus`                     |
+| **Python files**          | snake_case                          | `robot_status.py`                    |
+| **Python classes**        | PascalCase                          | `RobotStatusResponse`                |
+| **Python functions**      | snake_case                          | `get_robot_status`                   |
+| **API endpoints**         | kebab-case                          | `/api/v1/robot-status`               |
+| **Socket events**         | snake_case                          | `robot_telemetry`, `delivery_update` |
+| **Database tables**       | snake_case plural                   | `deliveries`, `robots`               |
+| **Environment vars**      | SCREAMING_SNAKE                     | `SUPABASE_URL`, `API_SECRET_KEY`     |
 
 ---
 
@@ -93,6 +107,7 @@ next-fast-turbo/
 ### 3.1 React/Next.js Components
 
 **Always prefer Server Components.** Only add `'use client'` when you need:
+
 - `useState`, `useEffect`, `useReducer`
 - Event handlers (`onClick`, `onChange`)
 - Browser APIs (`window`, `localStorage`)
@@ -108,7 +123,7 @@ interface RobotInfoProps {
 
 export async function RobotInfo({ robotId }: RobotInfoProps) {
   const robot = await getRobot(robotId);
-  
+
   return (
     <div className="rounded-lg border bg-card p-6">
       <h2 className="text-lg font-semibold">{robot.name}</h2>
@@ -200,10 +215,11 @@ export function DashboardCard({
           <p
             className={cn(
               "text-xs",
-              trend.isPositive ? "text-green-600" : "text-red-600"
+              trend.isPositive ? "text-green-600" : "text-red-600",
             )}
           >
-            {trend.isPositive ? "+" : "-"}{Math.abs(trend.value)}%
+            {trend.isPositive ? "+" : "-"}
+            {Math.abs(trend.value)}%
           </p>
         )}
       </CardContent>
@@ -230,7 +246,7 @@ export function DashboardCard({
 ```typescript
 // apps/web/types/delivery.ts
 
-export type DeliveryStatus = 
+export type DeliveryStatus =
   | "pending"
   | "assigned"
   | "in_transit"
@@ -271,7 +287,7 @@ export interface Robot {
   lastSeen: string;
 }
 
-export type RobotStatus = 
+export type RobotStatus =
   | "idle"
   | "charging"
   | "delivering"
@@ -452,7 +468,7 @@ async def get_all_robots(
 ) -> ApiResponse[list[RobotResponse]]:
     """
     Retrieve all robots.
-    
+
     Returns a list of all robots in the system with their current status.
     """
     robots = await crud_robot.get_multi(session, skip=skip, limit=limit)
@@ -469,13 +485,13 @@ async def get_robot(
 ) -> ApiResponse[RobotResponse]:
     """
     Get a specific robot by ID.
-    
+
     Args:
         robot_id: The unique identifier of the robot.
-    
+
     Returns:
         Robot details including current status and location.
-    
+
     Raises:
         404: Robot not found.
     """
@@ -498,7 +514,7 @@ async def get_robot_status(
 ) -> ApiResponse[RobotStatusResponse]:
     """
     Get real-time status of a robot.
-    
+
     Includes battery level, current location, and active delivery info.
     """
     robot = await crud_robot.get(session, id=robot_id)
@@ -507,7 +523,7 @@ async def get_robot_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Robot with id {robot_id} not found"
         )
-    
+
     status_data = RobotStatusResponse(
         id=robot.id,
         name=robot.name,
@@ -517,7 +533,7 @@ async def get_robot_status(
         current_delivery_id=robot.current_delivery_id,
         last_seen=robot.last_seen,
     )
-    
+
     return success_response(
         data=status_data,
         message="Robot status retrieved"
@@ -533,7 +549,7 @@ async def send_robot_command(
 ) -> ApiResponse[CommandResponse]:
     """
     Send a command to a robot.
-    
+
     Valid commands: start, stop, pause, resume, return_to_base.
     Requires authentication.
     """
@@ -543,16 +559,16 @@ async def send_robot_command(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Robot with id {robot_id} not found"
         )
-    
+
     # Validate command based on robot state
     if command.action == "start" and robot.status != "idle":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot start robot in {robot.status} state"
         )
-    
+
     result = await crud_robot.execute_command(session, robot=robot, command=command)
-    
+
     return success_response(
         data=CommandResponse(
             robot_id=robot_id,
@@ -667,7 +683,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public statusCode: number,
-    public errors?: Record<string, string[]>
+    public errors?: Record<string, string[]>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -676,7 +692,7 @@ export class ApiError extends Error {
 
 export async function apiRequest<T>(
   url: string,
-  options?: RequestInit
+  options?: RequestInit,
 ): Promise<T> {
   try {
     const response = await fetch(url, {
@@ -693,7 +709,7 @@ export async function apiRequest<T>(
       throw new ApiError(
         data.message || "An error occurred",
         response.status,
-        "errors" in data ? data.errors : undefined
+        "errors" in data ? data.errors : undefined,
       );
     }
 
@@ -704,7 +720,7 @@ export async function apiRequest<T>(
     }
     throw new ApiError(
       error instanceof Error ? error.message : "Network error",
-      0
+      0,
     );
   }
 }
@@ -854,7 +870,7 @@ async def generic_exception_handler(
     """Handle unexpected errors."""
     # Log the error for debugging
     print(f"Unexpected error: {exc}")
-    
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -872,14 +888,14 @@ async def generic_exception_handler(
 
 ### 8.1 Event Names and Payloads
 
-| Event | Direction | Payload | Description |
-|-------|-----------|---------|-------------|
-| `robot_telemetry` | Server → Client | `RobotTelemetry` | Real-time robot position/battery |
-| `rfid_scan` | Server → Client | `RFIDScanEvent` | RFID tag scanned by robot |
-| `delivery_update` | Server → Client | `DeliveryUpdate` | Delivery status changed |
-| `robot_command` | Client → Server | `RobotCommand` | Send command to robot |
-| `subscribe_robot` | Client → Server | `{ robotId: string }` | Subscribe to robot updates |
-| `unsubscribe_robot` | Client → Server | `{ robotId: string }` | Unsubscribe from robot |
+| Event               | Direction       | Payload               | Description                      |
+| ------------------- | --------------- | --------------------- | -------------------------------- |
+| `robot_telemetry`   | Server → Client | `RobotTelemetry`      | Real-time robot position/battery |
+| `rfid_scan`         | Server → Client | `RFIDScanEvent`       | RFID tag scanned by robot        |
+| `delivery_update`   | Server → Client | `DeliveryUpdate`      | Delivery status changed          |
+| `robot_command`     | Client → Server | `RobotCommand`        | Send command to robot            |
+| `subscribe_robot`   | Client → Server | `{ robotId: string }` | Subscribe to robot updates       |
+| `unsubscribe_robot` | Client → Server | `{ robotId: string }` | Unsubscribe from robot           |
 
 ### 8.2 TypeScript Event Types
 
@@ -962,7 +978,7 @@ interface UseRobotSocketReturn {
 
 export function useRobotSocket(
   robotId: string,
-  options: UseRobotSocketOptions = {}
+  options: UseRobotSocketOptions = {},
 ): UseRobotSocketReturn {
   const {
     onTelemetry,
@@ -1030,7 +1046,7 @@ export function useRobotSocket(
         });
       }
     },
-    [robotId]
+    [robotId],
   );
 
   const subscribe = useCallback(() => {
@@ -1114,6 +1130,7 @@ p-5 = 20px   p-6 = 24px   p-8 = 32px   p-10 = 40px
 ```
 
 **Standard component spacing:**
+
 - Card padding: `p-4` or `p-6`
 - Section margins: `mb-6` or `mb-8`
 - Flex gaps: `gap-2`, `gap-4`, `gap-6`
@@ -1202,9 +1219,384 @@ Mobile-first approach:
 
 ---
 
-## 10. Testing Standards
+## 10. PWA & Mobile-First Standards
 
-### 10.1 Frontend Testing (Vitest + Testing Library)
+### 10.1 PWA Configuration
+
+**Required files for PWA:**
+
+```
+apps/web/
+├── public/
+│   ├── manifest.json          # PWA manifest
+│   ├── sw.js                  # Service worker (if custom)
+│   ├── icons/
+│   │   ├── icon-192x192.png   # Android/Chrome
+│   │   ├── icon-512x512.png   # Splash screen
+│   │   ├── apple-touch-icon.png  # iOS
+│   │   └── maskable-icon.png  # Adaptive icon
+│   └── screenshots/           # App store preview
+├── app/
+│   └── manifest.ts            # Next.js manifest API
+```
+
+**Manifest configuration:**
+
+```typescript
+// apps/web/app/manifest.ts
+import { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Stair-Doc Robot Control",
+    short_name: "Stair-Doc",
+    description: "Control and monitor stair-climbing delivery robots",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#0a0a0a",
+    theme_color: "#3b82f6",
+    orientation: "portrait-primary",
+    icons: [
+      {
+        src: "/icons/icon-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+      },
+      {
+        src: "/icons/icon-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+      },
+      {
+        src: "/icons/maskable-icon.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
+    ],
+  };
+}
+```
+
+### 10.2 Mobile-First Component Patterns
+
+**Touch-optimized button (min 44x44px):**
+
+```tsx
+// ✅ Mobile-friendly button
+<Button className="min-h-[44px] min-w-[44px] touch-manipulation">
+  <Play className="h-5 w-5" />
+</Button>
+
+// ✅ Full-width mobile button
+<Button className="w-full py-4 text-lg sm:w-auto sm:py-2 sm:text-sm">
+  Start Delivery
+</Button>
+```
+
+**Bottom navigation for mobile:**
+
+```tsx
+// apps/web/components/layouts/mobile-nav.tsx
+"use client";
+
+import { cn } from "@/lib/utils";
+import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { Home, Bot, Package, User } from "lucide-react";
+
+const navItems = [
+  { href: "/", icon: Home, label: "Home" },
+  { href: "/robots", icon: Bot, label: "Robots" },
+  { href: "/deliveries", icon: Package, label: "Deliveries" },
+  { href: "/profile", icon: User, label: "Profile" },
+];
+
+export function MobileNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:hidden">
+      <div className="flex h-16 items-center justify-around px-4">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1 px-3 py-2 min-w-[64px] min-h-[44px] rounded-lg transition-colors",
+                isActive
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <item.icon className="h-5 w-5" />
+              <span className="text-xs font-medium">{item.label}</span>
+            </Link>
+          );
+        })}
+      </div>
+      {/* Safe area for iOS home indicator */}
+      <div className="h-[env(safe-area-inset-bottom)]" />
+    </nav>
+  );
+}
+```
+
+### 10.3 Responsive Layout Pattern
+
+```tsx
+// Mobile-first responsive layout
+export function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Desktop sidebar - hidden on mobile */}
+      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col">
+        <DesktopSidebar />
+      </aside>
+
+      {/* Main content with mobile padding */}
+      <main className="pb-20 md:pb-0 md:pl-64">
+        <div className="container mx-auto px-4 py-4 sm:px-6 lg:px-8">
+          {children}
+        </div>
+      </main>
+
+      {/* Mobile bottom nav - hidden on desktop */}
+      <MobileNav />
+    </div>
+  );
+}
+```
+
+### 10.4 Offline Support Hook
+
+```tsx
+// apps/web/hooks/use-online-status.ts
+"use client";
+
+import { useSyncExternalStore } from "react";
+
+function subscribe(callback: () => void) {
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+
+function getSnapshot() {
+  return navigator.onLine;
+}
+
+function getServerSnapshot() {
+  return true; // Assume online during SSR
+}
+
+/**
+ * Hook to track online/offline status for PWA support
+ * Uses useSyncExternalStore for proper subscription handling
+ */
+export function useOnlineStatus(): boolean {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+```
+
+**Offline indicator component:**
+
+```tsx
+// apps/web/components/ui/offline-indicator.tsx
+"use client";
+
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { WifiOff } from "lucide-react";
+
+export function OfflineIndicator() {
+  const isOnline = useOnlineStatus();
+
+  if (isOnline) return null;
+
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 px-4 py-2 text-center text-sm font-medium text-white safe-top">
+      <WifiOff className="mr-2 inline h-4 w-4" />
+      You are offline. Some features may be unavailable.
+    </div>
+  );
+}
+```
+
+### 10.5 Pull-to-Refresh Pattern
+
+```tsx
+// apps/web/components/ui/pull-to-refresh.tsx
+"use client";
+
+import { useState, useRef, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface PullToRefreshProps {
+  onRefresh: () => Promise<void>;
+  children: React.ReactNode;
+}
+
+export function PullToRefresh({ onRefresh, children }: PullToRefreshProps) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const startY = useRef(0);
+  const threshold = 80;
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (window.scrollY === 0) {
+      startY.current = e.touches[0].clientY;
+    }
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (startY.current === 0) return;
+    const currentY = e.touches[0].clientY;
+    const distance = Math.max(0, currentY - startY.current);
+    setPullDistance(Math.min(distance, threshold * 1.5));
+  }, []);
+
+  const handleTouchEnd = useCallback(async () => {
+    if (pullDistance >= threshold && !isRefreshing) {
+      setIsRefreshing(true);
+      await onRefresh();
+      setIsRefreshing(false);
+    }
+    setPullDistance(0);
+    startY.current = 0;
+  }, [pullDistance, isRefreshing, onRefresh]);
+
+  return (
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-center transition-all",
+          pullDistance > 0 ? "opacity-100" : "opacity-0",
+        )}
+        style={{ height: pullDistance }}
+      >
+        <RefreshCw
+          className={cn(
+            "h-6 w-6 text-muted-foreground",
+            isRefreshing && "animate-spin",
+          )}
+        />
+      </div>
+      {children}
+    </div>
+  );
+}
+```
+
+### 10.6 iOS Safe Area Handling
+
+```css
+/* apps/web/app/globals.css */
+
+/* Safe areas for notch/home indicator */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Full viewport height accounting for mobile browser chrome */
+.min-h-screen-safe {
+  min-height: 100dvh;
+}
+
+/* Prevent pull-to-refresh on non-scrollable areas */
+.overscroll-none {
+  overscroll-behavior: none;
+}
+
+/* Disable text selection on interactive elements */
+.select-none-touch {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+```
+
+### 10.7 Mobile Viewport Meta Tags
+
+```tsx
+// apps/web/app/layout.tsx
+export const metadata: Metadata = {
+  title: "Stair-Doc | Robot Delivery Control",
+  description: "Control and monitor stair-climbing delivery robots",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false, // Prevents zoom on form focus
+    viewportFit: "cover", // For iOS notch support
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Stair-Doc",
+  },
+  formatDetection: {
+    telephone: false, // Disable auto phone number detection
+  },
+};
+```
+
+### 10.8 Responsive Breakpoints
+
+Use consistent breakpoints (Tailwind defaults):
+
+| Prefix | Min Width | Target        |
+| ------ | --------- | ------------- |
+| (none) | 0px       | Mobile phones |
+| `sm:`  | 640px     | Large phones  |
+| `md:`  | 768px     | Tablets       |
+| `lg:`  | 1024px    | Laptops       |
+| `xl:`  | 1280px    | Desktops      |
+| `2xl:` | 1536px    | Large screens |
+
+**Mobile-first examples:**
+
+```tsx
+// Grid: 1 col mobile → 2 col tablet → 4 col desktop
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+// Text: Mobile sizes → Desktop sizes
+<h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl">
+
+// Spacing: Compact mobile → Spacious desktop
+<div className="p-4 sm:p-6 lg:p-8">
+
+// Hide/show by device
+<div className="block md:hidden">Mobile only</div>
+<div className="hidden md:block">Desktop only</div>
+```
+
+---
+
+## 11. Testing Standards
+
+### 11.1 Frontend Testing (Vitest + Testing Library)
 
 ```tsx
 // apps/web/__tests__/components/dashboard-card.test.tsx
@@ -1217,20 +1609,16 @@ import { Battery } from "lucide-react";
 describe("DashboardCard", () => {
   it("renders title and value", () => {
     render(<DashboardCard title="Battery" value="85%" />);
-    
+
     expect(screen.getByText("Battery")).toBeInTheDocument();
     expect(screen.getByText("85%")).toBeInTheDocument();
   });
 
   it("renders optional description", () => {
     render(
-      <DashboardCard
-        title="Battery"
-        value="85%"
-        description="Charging"
-      />
+      <DashboardCard title="Battery" value="85%" description="Charging" />,
     );
-    
+
     expect(screen.getByText("Charging")).toBeInTheDocument();
   });
 
@@ -1240,29 +1628,23 @@ describe("DashboardCard", () => {
         title="Deliveries"
         value="142"
         trend={{ value: 12, isPositive: true }}
-      />
+      />,
     );
-    
+
     const trend = screen.getByText("+12%");
     expect(trend).toHaveClass("text-green-600");
   });
 
   it("renders icon when provided", () => {
-    render(
-      <DashboardCard
-        title="Battery"
-        value="85%"
-        icon={Battery}
-      />
-    );
-    
+    render(<DashboardCard title="Battery" value="85%" icon={Battery} />);
+
     // Icon is rendered (check by svg presence)
     expect(document.querySelector("svg")).toBeInTheDocument();
   });
 });
 ```
 
-### 10.2 Backend Testing (pytest)
+### 11.2 Backend Testing (pytest)
 
 ```python
 # apps/api/tests/test_robots.py
@@ -1293,7 +1675,7 @@ async def test_get_robots_empty():
     """Test getting robots when none exist."""
     async with AsyncClient(app=app, base_url="http://test") as client:
         response = await client.get("/api/v1/robots")
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["success"] is True
@@ -1306,7 +1688,7 @@ async def test_create_robot(sample_robot):
     """Test creating a new robot."""
     async with AsyncClient(app=app, base_url="http://test") as client:
         response = await client.post("/api/v1/robots", json=sample_robot)
-    
+
     assert response.status_code == 201
     data = response.json()
     assert data["success"] is True
@@ -1327,7 +1709,7 @@ async def test_create_robot_invalid_serial():
                 "address": "Test",
             },
         })
-    
+
     assert response.status_code == 422
     data = response.json()
     assert data["success"] is False
@@ -1344,7 +1726,7 @@ async def test_robot_command_invalid_state():
 
 ---
 
-## 11. Git Commit Standards
+## 12. Git Commit Standards
 
 ```
 <type>(<scope>): <subject>
@@ -1355,6 +1737,7 @@ async def test_robot_command_invalid_state():
 ```
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation
@@ -1365,6 +1748,7 @@ async def test_robot_command_invalid_state():
 - `chore`: Build/tooling changes
 
 **Scopes:**
+
 - `web`: Frontend app
 - `api`: Backend app
 - `ui`: Shared UI components
@@ -1372,6 +1756,7 @@ async def test_robot_command_invalid_state():
 - `deps`: Dependencies
 
 **Examples:**
+
 ```
 feat(api): add robot telemetry endpoint
 
@@ -1392,9 +1777,9 @@ Fixes #456
 
 ---
 
-## 12. Environment Variables
+## 13. Environment Variables
 
-### 12.1 Frontend (.env.local)
+### 13.1 Frontend (.env.local)
 
 ```env
 # API
@@ -1406,7 +1791,7 @@ NEXT_PUBLIC_ENABLE_TELEMETRY=true
 NEXT_PUBLIC_ENABLE_RFID=true
 ```
 
-### 12.2 Backend (.env)
+### 13.2 Backend (.env)
 
 ```env
 # Server
@@ -1452,7 +1837,7 @@ export default async function Page() {
 }
 
 // Client Component with state
-"use client";
+("use client");
 export function ClientComponent({ initialData }) {
   const [data, setData] = useState(initialData);
   // ...
