@@ -7,9 +7,17 @@ export const navConfig = {
     {
       icon: <Icons.home className="h-5 w-5" />,
       iconMobile: <Icons.home className="h-5 w-5" />,
-      label: "Dashboard",
+      label: "Overview",
       href: "/",
       pageTitle: "Stair-Doc Dashboard",
+      navLocation: "top",
+    },
+    {
+      icon: <Icons.performance className="h-5 w-5" />,
+      iconMobile: <Icons.performance className="h-5 w-5" />,
+      label: "Robot Status",
+      href: "/dashboard",
+      pageTitle: "Robot Status Dashboard",
       navLocation: "top",
     },
     {
