@@ -5,10 +5,11 @@ and sensor readings. Uses mock data for development.
 """
 
 import random
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 
+from src.schemas.base import ApiResponse, success_response
 from src.schemas.robot import (
     BatteryResponse,
     LocationResponse,
@@ -149,7 +150,7 @@ def _build_robot_response(robot_data: dict) -> RobotStatusResponse:
         stairs_climbed=robot_data["stairs_climbed"],
         total_deliveries=robot_data["total_deliveries"],
         current_delivery_id=robot_data.get("current_delivery_id"),
-        last_seen=datetime.utcnow(),
+        last_seen=datetime.now(UTC),
         uptime_seconds=robot_data["uptime_seconds"],
     )
 
@@ -159,31 +160,35 @@ def _build_robot_response(robot_data: dict) -> RobotStatusResponse:
 
 @router.get(
     "/status",
-    response_model=RobotStatusListResponse,
+    response_model=ApiResponse[RobotStatusListResponse],
     summary="Get all robot statuses",
     description="Returns the current status of all Stair-Doc delivery robots "
     "including battery levels, locations, lock status, and sensor readings.",
 )
-async def get_all_robot_status() -> RobotStatusListResponse:
+async def get_all_robot_status() -> dict:
     robots = [_build_robot_response(r) for r in MOCK_ROBOTS]
-    return RobotStatusListResponse(
+    data = RobotStatusListResponse(
         robots=robots,
         total=len(robots),
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(UTC),
     )
+    return success_response(data, f"Retrieved {len(robots)} robots")
 
 
 @router.get(
     "/status/{robot_id}",
-    response_model=RobotStatusResponse,
+    response_model=ApiResponse[RobotStatusResponse],
     summary="Get single robot status",
     description="Returns the current status of a specific robot by ID.",
 )
-async def get_robot_status(robot_id: str) -> RobotStatusResponse:
+async def get_robot_status(robot_id: str) -> dict:
     robot_data = next((r for r in MOCK_ROBOTS if r["id"] == robot_id), None)
     if not robot_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Robot with id '{robot_id}' not found",
         )
-    return _build_robot_response(robot_data)
+    return success_response(
+        _build_robot_response(robot_data),
+        "Robot status retrieved successfully",
+    )

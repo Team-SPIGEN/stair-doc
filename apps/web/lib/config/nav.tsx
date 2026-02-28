@@ -21,6 +21,14 @@ export const navConfig = {
       navLocation: "top",
     },
     {
+      icon: <Icons.rules className="h-5 w-5" />,
+      iconMobile: <Icons.rules className="h-5 w-5" />,
+      label: "Deliveries",
+      href: "/deliveries",
+      pageTitle: "Delivery Queue",
+      navLocation: "top",
+    },
+    {
       icon: <Icons.file className="h-5 w-5" />,
       iconMobile: <Icons.file className="h-5 w-5" />,
       label: "Docs",

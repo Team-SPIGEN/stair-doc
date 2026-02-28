@@ -1,10 +1,65 @@
-from typing import ClassVar
+"""Shared schema primitives for the Stair-Doc API.
+
+Provides the standard ``ApiResponse`` envelope that ALL endpoints must use,
+plus convenience helpers ``success_response`` and ``error_response``.
+"""
+
+from datetime import UTC, datetime
+from typing import ClassVar, Generic, TypeVar
+
 from pydantic import BaseModel, ConfigDict
 
-# Shared properties
-# class CRUDBaseModel(BaseModel):
-#     # where the data
-#     table_name: str
+T = TypeVar("T")
+
+
+# ── Standard API envelope ────────────────────────────────────────────────
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    """Standard API response wrapper.
+
+    Every endpoint returns ``{ success, data, message, timestamp }``.
+    """
+
+    success: bool
+    data: T
+    message: str
+    timestamp: datetime
+
+
+class ApiErrorResponse(BaseModel):
+    """Error response (success is always False, data is always None)."""
+
+    success: bool = False
+    data: None = None
+    message: str
+    timestamp: datetime
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def success_response(data: T, message: str = "Success") -> dict:
+    """Build a successful envelope dict that FastAPI will serialise."""
+    return {
+        "success": True,
+        "data": data,
+        "message": message,
+        "timestamp": datetime.now(UTC),
+    }
+
+
+def error_response(message: str) -> dict:
+    """Build an error envelope dict."""
+    return {
+        "success": False,
+        "data": None,
+        "message": message,
+        "timestamp": datetime.now(UTC),
+    }
+
+
+# ── Legacy CRUD bases (kept for backward-compat) ────────────────────────
 
 
 # Properties to receive on item creation

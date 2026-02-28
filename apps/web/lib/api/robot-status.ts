@@ -69,6 +69,15 @@ export interface RobotStatusListResponse {
   timestamp: string;
 }
 
+// ── API Response envelope ────────────────────────────────────────────────
+
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message: string;
+  timestamp: string;
+}
+
 // ── API Error ────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -98,13 +107,19 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(
-      body?.detail ?? `Request failed: ${response.status}`,
+      body?.detail ?? body?.message ?? `Request failed: ${response.status}`,
       response.status,
       body,
     );
   }
 
-  return response.json() as Promise<T>;
+  const envelope: ApiResponse<T> = await response.json();
+
+  if (!envelope.success) {
+    throw new ApiError(envelope.message, response.status);
+  }
+
+  return envelope.data;
 }
 
 // ── Robot Status API ─────────────────────────────────────────────────────

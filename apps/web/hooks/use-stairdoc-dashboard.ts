@@ -8,6 +8,12 @@ import type {
   Robot 
 } from "@/types/dashboard";
 
+/** Monotonic counter to guarantee unique activity-event IDs. */
+let _evtSeq = 0;
+function nextEvtId(): string {
+  return `evt-${Date.now()}-${++_evtSeq}`;
+}
+
 // Simulated data for demo - replace with real WebSocket connection
 const MOCK_ROBOTS: Robot[] = [
   {
@@ -205,7 +211,7 @@ export function useStairDocDashboard(): UseStairDocDashboardReturn {
           // Occasionally add new activity
           if (Math.random() > 0.8) {
             const newActivity: ActivityEvent = {
-              id: `evt-${Date.now()}`,
+              id: nextEvtId(),
               type: ["delivery", "status", "alert", "system"][Math.floor(Math.random() * 4)] as ActivityEvent["type"],
               robotId: MOCK_ROBOTS[Math.floor(Math.random() * MOCK_ROBOTS.length)].id,
               robotName: MOCK_ROBOTS[Math.floor(Math.random() * MOCK_ROBOTS.length)].name,
@@ -256,7 +262,7 @@ export function useStairDocDashboard(): UseStairDocDashboardReturn {
     }
 
     const emergencyEvent: ActivityEvent = {
-      id: `evt-${Date.now()}`,
+      id: nextEvtId(),
       type: "alert",
       robotId,
       robotName: robotId ? robots.find(r => r.id === robotId)?.name : undefined,

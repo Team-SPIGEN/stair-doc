@@ -1,7 +1,8 @@
 from fastapi import APIRouter
 
-from src.api.api_v1.endpoints import robots
+from src.api.api_v1.endpoints import deliveries, robots
 
 api_router = APIRouter()
 
 api_router.include_router(robots.router)
+api_router.include_router(deliveries.router)

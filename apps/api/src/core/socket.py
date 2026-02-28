@@ -193,7 +193,7 @@ def _evolve_system_health() -> None:
 def _build_telemetry_payload(robot: dict[str, Any]) -> dict[str, Any]:
     """Build a robot_telemetry event payload (JSON-safe dict)."""
     return {
-        "robot_id": robot["id"],
+        "id": robot["id"],
         "name": robot["name"],
         "serial_number": robot["serial_number"],
         "status": robot["status"].value if isinstance(robot["status"], RobotStatus) else robot["status"],
