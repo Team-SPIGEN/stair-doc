@@ -5,6 +5,7 @@ Supports per-robot subscriptions and emergency stop commands.
 """
 
 import asyncio
+import math
 import random
 from datetime import datetime
 from typing import Any
@@ -127,6 +128,49 @@ _system_health: dict[str, Any] = {
 
 # Background task reference
 _telemetry_task: asyncio.Task | None = None
+
+# ── Navigation State ─────────────────────────────────────────────────────
+
+_nav_state: dict[str, dict[str, Any]] = {
+    "robot-001": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+    "robot-002": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+    "robot-003": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+    "robot-004": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+}
+
+
+def _generate_lidar_scan() -> list[dict[str, float]]:
+    """Generate 360 simulated LIDAR scan points (270° FOV)."""
+    points: list[dict[str, float]] = []
+    for angle in range(0, 270):
+        # Base distance with some structure (walls, obstacles)
+        base = 3.0 + 1.5 * math.sin(math.radians(angle * 3))
+        # Occasional close obstacle
+        if random.random() > 0.95:
+            dist = round(random.uniform(0.2, 1.5), 2)
+        else:
+            dist = round(max(0.1, base + random.uniform(-0.3, 0.3)), 2)
+        points.append({"angle": float(angle), "distance": dist})
+    return points
+
+
+def _build_nav_status_payload(robot_id: str) -> dict[str, Any]:
+    """Build navigation status event payload."""
+    state = _nav_state.get(robot_id, {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False})
+    # Evolve autonomous progress
+    if state["mode"] == "autonomous":
+        state["progress"] = min(1.0, state["progress"] + random.uniform(0.005, 0.02))
+        if state["progress"] >= 1.0:
+            state["mode"] = "idle"
+            state["progress"] = 1.0
+    return {
+        "robot_id": robot_id,
+        "mode": state["mode"],
+        "target_floor": state["target_floor"],
+        "progress": round(state["progress"], 3),
+        "emergency_active": state["emergency"],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 # ── Telemetry Generator ─────────────────────────────────────────────────
@@ -265,6 +309,16 @@ async def _telemetry_loop() -> None:
             })
             await sio.emit("system_health", health_payload)
 
+            # Navigation data: LIDAR scan + nav status for each robot
+            lidar_data = _generate_lidar_scan()
+            await sio.emit("lidar_scan", {
+                "robot_id": "robot-001",
+                "points": lidar_data,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
+            for rid in _nav_state:
+                await sio.emit("nav_status", _build_nav_status_payload(rid))
+
 
 # ── Socket.IO Event Handlers ────────────────────────────────────────────
 
@@ -360,6 +414,76 @@ async def robot_command(sid: str, data: dict) -> None:
         "status": "accepted",
         "timestamp": datetime.utcnow().isoformat(),
     }, to=sid)
+
+
+@sio.event
+async def navigation_command(sid: str, data: dict) -> None:
+    """Handle real-time navigation commands from the frontend.
+
+    Supports manual joystick commands and autonomous mode toggle.
+    Broadcasts nav_status updates to all connected clients.
+    """
+    action = data.get("action", "")
+    robot_id = data.get("robotId", "robot-001")
+    now = datetime.utcnow().isoformat()
+
+    state = _nav_state.get(robot_id)
+    if state is None:
+        _nav_state[robot_id] = {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False}
+        state = _nav_state[robot_id]
+
+    if action == "emergency_stop":
+        state["mode"] = "emergency"
+        state["emergency"] = True
+        state["progress"] = 0.0
+        # Also stop the robot in telemetry state
+        for robot in _robot_state:
+            if robot["id"] == robot_id:
+                robot["status"] = RobotStatus.EMERGENCY
+                robot["speed"] = 0.0
+        await sio.emit("emergency_active", {"robot_id": robot_id, "active": True, "timestamp": now})
+
+    elif action == "reset_estop":
+        state["mode"] = "idle"
+        state["emergency"] = False
+        for robot in _robot_state:
+            if robot["id"] == robot_id:
+                robot["status"] = RobotStatus.IDLE
+        await sio.emit("emergency_active", {"robot_id": robot_id, "active": False, "timestamp": now})
+
+    elif action == "autonomous":
+        target_floor = data.get("targetFloor", 1)
+        state["mode"] = "autonomous"
+        state["target_floor"] = target_floor
+        state["progress"] = 0.0
+        state["emergency"] = False
+
+    elif action in ("forward", "backward", "left", "right"):
+        state["mode"] = "manual"
+        state["emergency"] = False
+        speed = data.get("speed", 0.5)
+        for robot in _robot_state:
+            if robot["id"] == robot_id:
+                robot["speed"] = speed
+
+    elif action == "stop":
+        state["mode"] = "idle"
+        for robot in _robot_state:
+            if robot["id"] == robot_id:
+                robot["speed"] = 0.0
+
+    # Broadcast updated nav status
+    await sio.emit("nav_status", _build_nav_status_payload(robot_id))
+
+    # Acknowledge
+    await sio.emit("command_ack", {
+        "action": f"nav_{action}",
+        "robot_id": robot_id,
+        "status": "accepted",
+        "timestamp": now,
+    }, to=sid)
+
+    print(f"[Socket.IO] Navigation: {action} → {robot_id}")
 
 
 @sio.event

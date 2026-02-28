@@ -129,6 +129,9 @@ importers:
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      nipplejs:
+        specifier: ^0.10.2
+        version: 0.10.2
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -4294,6 +4297,9 @@ packages:
   nimma@0.2.3:
     resolution: {integrity: sha512-1ZOI8J+1PKKGceo/5CT5GfQOG6H8I2BencSK06YarZ2wXwH37BSSUWldqJmMJYA5JfqDqffxDXynt6f11AyKcA==}
     engines: {node: ^12.20 || >=14.13}
+
+  nipplejs@0.10.2:
+    resolution: {integrity: sha512-XGxFY8C2DOtobf1fK+MXINTzkkXJLjZDDpfQhOUZf4TSytbc9s4bmA0lB9eKKM8iDivdr9NQkO7DpIQfsST+9g==}
 
   nlcst-to-string@4.0.0:
     resolution: {integrity: sha512-YKLBCcUYKAg0FNlOBT6aI91qFmSiFKiluk655WzPF+DDMA02qIyy8uiRqI8QXtcFpEvll12LpL5MXqEmAZ+dcA==}
@@ -11167,6 +11173,8 @@ snapshots:
     optionalDependencies:
       jsonpath-plus: 10.4.0
       lodash.topath: 4.5.2
+
+  nipplejs@0.10.2: {}
 
   nlcst-to-string@4.0.0:
     dependencies:

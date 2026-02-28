@@ -53,6 +53,14 @@ export const navConfig = {
       navLocation: "top",
     },
     {
+      icon: <Icons.gamepad className="h-5 w-5" />,
+      iconMobile: <Icons.gamepad className="h-5 w-5" />,
+      label: "Navigation",
+      href: "/navigation",
+      pageTitle: "Navigation Controls",
+      navLocation: "top",
+    },
+    {
       icon: <Icons.file className="h-5 w-5" />,
       iconMobile: <Icons.file className="h-5 w-5" />,
       label: "Docs",
