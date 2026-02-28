@@ -362,6 +362,61 @@ async def robot_command(sid: str, data: dict) -> None:
     }, to=sid)
 
 
+@sio.event
+async def rfid_scan(sid: str, data: dict) -> None:
+    """Handle real-time RFID scan from the frontend.
+
+    Checks a simple set of known tags and emits `rfid_result` back.
+    Also broadcasts `rfid_event` to all connected clients for live feeds.
+    """
+    tag_id = data.get("tagId", "")
+    robot_id = data.get("robotId", "")
+    delivery_id = data.get("deliveryId")
+    now = datetime.utcnow().isoformat()
+
+    # Simple lookup against known active tags
+    _known_tags = {
+        "RFID-A1B2C3": "Alice Johnson",
+        "RFID-D4E5F6": "Bob Smith",
+        "RFID-G7H8I9": "Carol Williams",
+    }
+
+    user_name = _known_tags.get(tag_id)
+    authorized = user_name is not None
+
+    result = {
+        "authorized": authorized,
+        "tag_id": tag_id,
+        "robot_id": robot_id,
+        "delivery_id": delivery_id,
+        "container_status": "unlocked" if authorized else "locked",
+        "user_name": user_name,
+        "message": (
+            f"Welcome, {user_name}! Container unlocked."
+            if authorized
+            else "Access denied — unknown or revoked tag."
+        ),
+        "timestamp": now,
+    }
+
+    # Send result back to the requesting client
+    await sio.emit("rfid_result", result, to=sid)
+
+    # Broadcast scan event to all connected clients (live activity feed)
+    await sio.emit("rfid_event", {
+        "tag_id": tag_id,
+        "robot_id": robot_id,
+        "delivery_id": delivery_id,
+        "authorized": authorized,
+        "user_name": user_name,
+        "scan_type": "unlock" if authorized else "denied",
+        "message": result["message"],
+        "timestamp": now,
+    })
+
+    print(f"[Socket.IO] RFID scan: {tag_id} → {'✅ authorized' if authorized else '❌ denied'}")
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────────
 
 def start_telemetry_background_task() -> None:

@@ -29,6 +29,14 @@ export const navConfig = {
       navLocation: "top",
     },
     {
+      icon: <Icons.creditCard className="h-5 w-5" />,
+      iconMobile: <Icons.creditCard className="h-5 w-5" />,
+      label: "RFID",
+      href: "/rfid",
+      pageTitle: "RFID Control",
+      navLocation: "top",
+    },
+    {
       icon: <Icons.file className="h-5 w-5" />,
       iconMobile: <Icons.file className="h-5 w-5" />,
       label: "Docs",
