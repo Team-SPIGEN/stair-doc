@@ -148,3 +148,101 @@ async def test_sort_ascending():
     deliveries = body["data"]["deliveries"]
     if len(deliveries) >= 2:
         assert deliveries[0]["created_at"] <= deliveries[-1]["created_at"]
+
+
+# ── PATCH /api/v1/deliveries/{id} ────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_update_delivery_status():
+    """PATCH /api/v1/deliveries/{id} updates the status."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.patch(
+            "/api/v1/deliveries/del-003",
+            json={"status": "assigned"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["data"]["status"] == "assigned"
+    assert body["data"]["id"] == "del-003"
+
+
+@pytest.mark.anyio
+async def test_update_delivery_multiple_fields():
+    """PATCH /api/v1/deliveries/{id} can update multiple fields at once."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.patch(
+            "/api/v1/deliveries/del-001",
+            json={"priority": "express", "notes": "Updated note"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["priority"] == "express"
+    assert data["notes"] == "Updated note"
+
+
+@pytest.mark.anyio
+async def test_update_delivery_not_found():
+    """PATCH returns 404 for non-existent delivery."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.patch(
+            "/api/v1/deliveries/del-nonexistent",
+            json={"status": "cancelled"},
+        )
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_update_delivery_no_fields():
+    """PATCH with empty body returns 400."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.patch("/api/v1/deliveries/del-001", json={})
+
+    assert resp.status_code == 400
+
+
+# ── DELETE /api/v1/deliveries/{id} ───────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_delete_delivery():
+    """DELETE /api/v1/deliveries/{id} removes and returns the delivery."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Create first so we can safely delete
+        create_resp = await ac.post(
+            "/api/v1/deliveries",
+            json={
+                "pickup_location": {"floor": 1, "building": "X"},
+                "dropoff_location": {"floor": 2, "building": "X"},
+                "recipient_name": "Delete Me",
+            },
+        )
+        new_id = create_resp.json()["data"]["id"]
+
+        # Delete it
+        del_resp = await ac.delete(f"/api/v1/deliveries/{new_id}")
+        assert del_resp.status_code == 200
+        assert del_resp.json()["data"]["id"] == new_id
+
+        # Should no longer exist
+        get_resp = await ac.get(f"/api/v1/deliveries/{new_id}")
+        assert get_resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_delete_delivery_not_found():
+    """DELETE returns 404 for non-existent delivery."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.delete("/api/v1/deliveries/del-nonexistent")
+
+    assert resp.status_code == 404

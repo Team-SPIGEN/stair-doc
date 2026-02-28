@@ -1,6 +1,7 @@
 export { StatsCard } from "./stats-card";
 export { BatteryGauge, BatteryGaugeCircular } from "./battery-gauge";
 export { EmergencyStopButton, EmergencyStopBanner } from "./emergency-stop";
+export { GlobalEmergencyStop } from "./global-emergency-stop";
 export { ActivityFeed } from "./activity-feed";
 export { RobotCard, RobotCardSkeleton } from "./robot-card";
 export { RobotStatusCard } from "./robot-status-card";

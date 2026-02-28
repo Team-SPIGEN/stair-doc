@@ -16,8 +16,8 @@ else:
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "FastAPI App"
-    PROJECT_DESCRIPTION: str = "A simple FastAPI app"
+    PROJECT_NAME: str = "Stair-Doc"
+    PROJECT_DESCRIPTION: str = "Autonomous stair-climbing delivery robot control API"
     DB_URL: str = os.getenv("DB_URL", "")
     DB_API_KEY: str = os.getenv("DB_API_KEY", "")
     DB_EMAIL: str = os.getenv("DB_EMAIL", "")

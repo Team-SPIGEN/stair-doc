@@ -37,6 +37,22 @@ export const navConfig = {
       navLocation: "top",
     },
     {
+      icon: <Icons.camera className="h-5 w-5" />,
+      iconMobile: <Icons.camera className="h-5 w-5" />,
+      label: "Camera",
+      href: "/camera",
+      pageTitle: "Live Robot Camera",
+      navLocation: "top",
+    },
+    {
+      icon: <Icons.image className="h-5 w-5" />,
+      iconMobile: <Icons.image className="h-5 w-5" />,
+      label: "Gallery",
+      href: "/camera/gallery",
+      pageTitle: "Photo Gallery",
+      navLocation: "top",
+    },
+    {
       icon: <Icons.file className="h-5 w-5" />,
       iconMobile: <Icons.file className="h-5 w-5" />,
       label: "Docs",

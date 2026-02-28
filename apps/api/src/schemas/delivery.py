@@ -59,6 +59,16 @@ class DeliveryCreate(BaseModel):
     notes: Optional[str] = Field(None, max_length=500)
 
 
+class DeliveryUpdate(BaseModel):
+    """Schema for updating an existing delivery (all fields optional)."""
+
+    status: Optional[DeliveryStatus] = None
+    robot_id: Optional[str] = Field(None, max_length=50)
+    priority: Optional[Priority] = None
+    recipient_name: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
 # ── Response schemas ─────────────────────────────────────────────────────
 
 

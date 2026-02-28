@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 import { OpenAPI } from "@/lib/api/client";
 import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { OfflineIndicator } from "@/components/ui/offline-indicator";
+import { GlobalEmergencyStop } from "@/components/dashboard/global-emergency-stop";
 
 export const fontSans = FontSans({
   subsets: ["latin"],
@@ -66,6 +67,7 @@ export default function RootLayout({
         >
           <OfflineIndicator />
           <DashboardLayout>{children}</DashboardLayout>
+          <GlobalEmergencyStop />
           <TailwindIndicator />
         </ThemeProvider>
       </body>

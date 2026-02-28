@@ -417,6 +417,81 @@ async def rfid_scan(sid: str, data: dict) -> None:
     print(f"[Socket.IO] RFID scan: {tag_id} → {'✅ authorized' if authorized else '❌ denied'}")
 
 
+@sio.event
+async def camera_snapshot(sid: str, data: dict) -> None:
+    """Handle a snapshot request from the frontend.
+
+    When a client requests a snapshot for a robot, we broadcast a
+    simulated camera frame (base64 placeholder) to all subscribers.
+    """
+    robot_id = data.get("robotId", "")
+    camera_source = data.get("cameraSource", "front")
+    now = datetime.utcnow().isoformat()
+
+    frame_payload = {
+        "robot_id": robot_id,
+        "camera_source": camera_source,
+        "frame_type": "snapshot",
+        "timestamp": now,
+        # In production this would be a base64-encoded JPEG from the Pi Camera
+        "frame_data": None,
+        "resolution": "1280x720",
+        "message": f"Snapshot captured from {robot_id} ({camera_source} camera)",
+    }
+
+    # Send frame to the requesting client
+    await sio.emit("camera_frame", frame_payload, to=sid)
+
+    # Broadcast notification to all clients
+    await sio.emit("camera_event", {
+        "type": "snapshot",
+        "robot_id": robot_id,
+        "camera_source": camera_source,
+        "timestamp": now,
+        "message": f"Snapshot captured from {robot_id}",
+    })
+
+    print(f"[Socket.IO] Camera snapshot: {robot_id} ({camera_source})")
+
+
+@sio.event
+async def camera_stream_toggle(sid: str, data: dict) -> None:
+    """Start or stop a simulated camera stream for a robot."""
+    robot_id = data.get("robotId", "")
+    action = data.get("action", "start")  # "start" | "stop"
+    now = datetime.utcnow().isoformat()
+
+    await sio.emit("camera_event", {
+        "type": f"stream_{action}",
+        "robot_id": robot_id,
+        "timestamp": now,
+        "message": f"Camera stream {action}ed for {robot_id}",
+    })
+
+    await sio.emit("camera_stream_status", {
+        "robot_id": robot_id,
+        "active": action == "start",
+        "timestamp": now,
+    }, to=sid)
+
+    print(f"[Socket.IO] Camera stream {action}: {robot_id}")
+
+
+async def broadcast_new_photo(photo_data: dict) -> None:
+    """Broadcast a new_photo event to all connected clients.
+
+    Call this from the camera upload endpoint so the gallery can
+    auto-refresh when new photos arrive.
+    """
+    if _connected_sids:
+        await sio.emit("new_photo", {
+            "photo": photo_data,
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": "New photo uploaded",
+        })
+        print(f"[Socket.IO] Broadcast new_photo: {photo_data.get('id', 'unknown')}")
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────────
 
 def start_telemetry_background_task() -> None:

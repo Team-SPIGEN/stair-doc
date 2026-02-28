@@ -13,6 +13,7 @@ pydantic-settings = "^2.7.0"
 python-dotenv = "^1.2.1"
 supabase = "^2.15.0"
 python-socketio = {version = "^5.16.0", extras = ["asgi"]}
+python-multipart = ">=0.0.18"
 
 [tool.poetry.group.dev.dependencies]
 isort = "^5.13.2"

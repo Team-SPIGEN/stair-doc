@@ -17,6 +17,7 @@ from src.schemas.delivery import (
     DeliveryLocation,
     DeliveryResponse,
     DeliveryStatus,
+    DeliveryUpdate,
     Priority,
 )
 
@@ -203,3 +204,57 @@ async def create_delivery(payload: DeliveryCreate) -> dict:
     )
     _deliveries.append(delivery)
     return success_response(delivery, "Delivery created successfully")
+
+
+@router.patch(
+    "/{delivery_id}",
+    response_model=ApiResponse[DeliveryResponse],
+    summary="Update a delivery",
+    description=(
+        "Partially update a delivery. Allows changing status, assigned robot, "
+        "priority, recipient name, and notes."
+    ),
+)
+async def update_delivery(delivery_id: str, payload: DeliveryUpdate) -> dict:
+    for idx, delivery in enumerate(_deliveries):
+        if delivery.id == delivery_id:
+            update_data = payload.model_dump(exclude_unset=True)
+            if not update_data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No fields to update",
+                )
+            update_data["updated_at"] = datetime.now(UTC)
+            # If status changed to delivered, set actual_arrival
+            if (
+                "status" in update_data
+                and update_data["status"] == DeliveryStatus.DELIVERED
+                and delivery.actual_arrival is None
+            ):
+                update_data["actual_arrival"] = datetime.now(UTC)
+            updated = delivery.model_copy(update=update_data)
+            _deliveries[idx] = updated
+            return success_response(updated, "Delivery updated successfully")
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Delivery with id '{delivery_id}' not found",
+    )
+
+
+@router.delete(
+    "/{delivery_id}",
+    response_model=ApiResponse[DeliveryResponse],
+    summary="Delete a delivery",
+    description="Remove a delivery from the queue. Returns the deleted delivery.",
+)
+async def delete_delivery(delivery_id: str) -> dict:
+    for idx, delivery in enumerate(_deliveries):
+        if delivery.id == delivery_id:
+            removed = _deliveries.pop(idx)
+            return success_response(removed, "Delivery deleted successfully")
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Delivery with id '{delivery_id}' not found",
+    )

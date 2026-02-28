@@ -1,9 +1,12 @@
 "use client";
 
-import { useStairDocDashboard } from "@/hooks/use-stairdoc-dashboard";
+import { useState, useCallback } from "react";
+import { useRobotSocket } from "@/hooks/use-robot-socket";
+import type { DeliveryUpdatePayload } from "@/hooks/use-robot-socket";
+import type { ActivityEvent } from "@/types/dashboard";
 import {
   StatsCard,
-  RobotCard,
+  RobotStatusCard,
   ActivityFeed,
   EmergencyStopButton,
   EmergencyStopBanner,
@@ -26,36 +29,65 @@ import {
   MapPin,
 } from "lucide-react";
 
+/** Monotonic counter for unique event IDs. */
+let _seq = 0;
+function nextId(): string {
+  return `evt-${Date.now()}-${++_seq}`;
+}
+
 export function StairDocDashboard() {
+  const [selectedRobotId, setSelectedRobotId] = useState<string | null>(null);
+  const [activities, setActivities] = useState<ActivityEvent[]>([]);
+
+  // Track delivery updates as activity events
+  const handleDeliveryUpdate = useCallback((data: DeliveryUpdatePayload) => {
+    const event: ActivityEvent = {
+      id: nextId(),
+      type: "delivery",
+      robotId: data.robot_id ?? undefined,
+      message: data.message,
+      timestamp: data.timestamp,
+      severity: data.type === "emergency_stop" ? "error" : "info",
+    };
+    setActivities((prev) => [event, ...prev].slice(0, 50));
+  }, []);
+
   const {
     isConnected,
-    isLoading,
-    error,
     robots,
-    activities,
-    stats,
-    selectedRobot,
-    selectRobot,
-    sendEmergencyStop,
-    refreshData,
-  } = useStairDocDashboard();
+    systemHealth,
+    tickCount,
+    sendCommand,
+  } = useRobotSocket({
+    onDeliveryUpdate: handleDeliveryUpdate,
+  });
 
-  if (isLoading) {
-    return <DashboardLoading />;
-  }
+  const selectedRobot = robots.find((r) => r.id === selectedRobotId) ?? null;
 
-  if (error) {
-    return <DashboardError error={error} onRetry={refreshData} />;
-  }
+  // Derive stats from real data
+  const activeCount = robots.filter((r) =>
+    ["delivering", "climbing", "descending", "returning"].includes(r.status),
+  ).length;
+  const chargingCount = robots.filter((r) => r.status === "charging").length;
+  const totalDeliveries = robots.reduce((s, r) => s + r.total_deliveries, 0);
+  const totalStairs = robots.reduce((s, r) => s + r.stairs_climbed, 0);
+  const avgBattery = robots.length
+    ? Math.round(robots.reduce((s, r) => s + r.battery.level, 0) / robots.length)
+    : 0;
 
   const hasEmergency = robots.some((r) => r.status === "emergency");
+
+  // Show loading only before the first telemetry tick
+  if (robots.length === 0 && tickCount === 0) {
+    return <DashboardLoading />;
+  }
 
   return (
     <div className="space-y-6">
       {/* Emergency Banner */}
       {hasEmergency && (
         <EmergencyStopBanner
-          onEmergencyStop={() => sendEmergencyStop()}
+          onEmergencyStop={async () => sendCommand("resume")}
           isActive={hasEmergency}
         />
       )}
@@ -68,14 +100,18 @@ export function StairDocDashboard() {
           </h1>
           <p className="text-muted-foreground">
             Real-time monitoring and control for your delivery robot fleet
+            {robots.length > 0 && (
+              <> &middot; {robots.length} robot{robots.length !== 1 ? "s" : ""}</>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <ConnectionStatus isConnected={isConnected} />
-          <Button variant="outline" size="sm" onClick={refreshData}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
+          {tickCount > 0 && (
+            <span className="text-xs text-muted-foreground">
+              tick #{tickCount}
+            </span>
+          )}
         </div>
       </div>
 
@@ -83,35 +119,31 @@ export function StairDocDashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title="Active Robots"
-          value={`${stats.activeRobots}/${stats.totalRobots}`}
-          subtitle={`${stats.robotsCharging} charging`}
+          value={`${activeCount}/${robots.length}`}
+          subtitle={`${chargingCount} charging`}
           icon={Bot}
           gradient="blue"
-          trend={{ value: 12, isPositive: true }}
         />
         <StatsCard
-          title="Deliveries Today"
-          value={stats.deliveriesToday}
-          subtitle={`${stats.successRate}% success rate`}
+          title="Total Deliveries"
+          value={totalDeliveries.toLocaleString()}
+          subtitle="All-time fleet total"
           icon={Package}
           gradient="green"
-          trend={{ value: 8, isPositive: true }}
         />
         <StatsCard
           title="Stairs Climbed"
-          value={stats.stairsClimbedToday}
-          subtitle="Today's total"
+          value={totalStairs.toLocaleString()}
+          subtitle="Fleet total flights"
           icon={ArrowUpDown}
           gradient="purple"
-          trend={{ value: 15, isPositive: true }}
         />
         <StatsCard
-          title="Avg. Delivery Time"
-          value={`${stats.avgDeliveryTime}m`}
-          subtitle={`${stats.pendingDeliveries} pending`}
-          icon={Clock}
+          title="Avg. Battery"
+          value={`${avgBattery}%`}
+          subtitle={`${robots.length} robot${robots.length !== 1 ? "s" : ""} online`}
+          icon={Zap}
           gradient="orange"
-          trend={{ value: 5, isPositive: false }}
         />
       </div>
 
@@ -120,18 +152,25 @@ export function StairDocDashboard() {
         {/* Robot Fleet */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">Robot Fleet</h2>
-            <Button variant="ghost" size="sm">
-              View All <ChevronRight className="ml-1 h-4 w-4" />
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              Robot Fleet
+              {isConnected && (
+                <Zap className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
+              )}
+            </h2>
+            <Button variant="ghost" size="sm" asChild>
+              <a href="/dashboard">
+                View Details <ChevronRight className="ml-1 h-4 w-4" />
+              </a>
             </Button>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             {robots.map((robot) => (
-              <RobotCard
+              <RobotStatusCard
                 key={robot.id}
                 robot={robot}
                 isSelected={selectedRobot?.id === robot.id}
-                onSelect={selectRobot}
+                onSelect={setSelectedRobotId}
               />
             ))}
           </div>
@@ -144,8 +183,8 @@ export function StairDocDashboard() {
             {/* Emergency Stop */}
             <Card className="flex flex-col items-center justify-center p-6">
               <EmergencyStopButton
-                onEmergencyStop={() =>
-                  sendEmergencyStop(selectedRobot?.id)
+                onEmergencyStop={async () =>
+                  sendCommand("emergency_stop", selectedRobot?.id ?? undefined)
                 }
                 robotName={selectedRobot?.name}
               />
@@ -161,15 +200,15 @@ export function StairDocDashboard() {
                 </CardHeader>
                 <CardContent className="flex flex-col items-center pt-2">
                   <BatteryGaugeCircular
-                    level={selectedRobot.batteryLevel}
-                    isCharging={selectedRobot.status === "charging"}
+                    level={selectedRobot.battery.level}
+                    isCharging={selectedRobot.battery.is_charging}
                     size={100}
                   />
                   <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4" />
                     <span>
-                      {selectedRobot.currentLocation.building}, Floor{" "}
-                      {selectedRobot.currentLocation.floor}
+                      {selectedRobot.location.building}, Floor{" "}
+                      {selectedRobot.location.floor}
                     </span>
                   </div>
                 </CardContent>
@@ -199,9 +238,9 @@ export function StairDocDashboard() {
               <TrendingUp className="h-6 w-6 text-blue-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold">98.2%</p>
+              <p className="text-2xl font-bold">{robots.length}</p>
               <p className="text-sm text-muted-foreground">
-                Delivery Success Rate
+                Robots Connected
               </p>
             </div>
           </CardContent>
@@ -209,12 +248,12 @@ export function StairDocDashboard() {
         <Card>
           <CardContent className="flex items-center gap-4 p-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-500/10">
-              <Zap className="h-6 w-6 text-emerald-500" />
+              <Clock className="h-6 w-6 text-emerald-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold">24/7</p>
+              <p className="text-2xl font-bold">{avgBattery}%</p>
               <p className="text-sm text-muted-foreground">
-                System Uptime
+                Fleet Avg Battery
               </p>
             </div>
           </CardContent>
@@ -225,9 +264,9 @@ export function StairDocDashboard() {
               <ArrowUpDown className="h-6 w-6 text-purple-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold">1,247</p>
+              <p className="text-2xl font-bold">{totalStairs.toLocaleString()}</p>
               <p className="text-sm text-muted-foreground">
-                Total Flights This Week
+                Total Flights Climbed
               </p>
             </div>
           </CardContent>

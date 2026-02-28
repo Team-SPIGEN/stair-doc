@@ -1,8 +1,15 @@
-"""Quick Socket.IO connectivity test."""
+"""Quick Socket.IO connectivity test.
+
+Run manually against a live server:
+    python tests/test_socket.py
+"""
 import asyncio
+
+import pytest
 import socketio
 
 
+@pytest.mark.skip(reason="Manual integration test — requires a running server")
 async def test():
     sio = socketio.AsyncClient()
     received = []

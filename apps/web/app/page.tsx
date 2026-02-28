@@ -1,3 +1,5 @@
+"use client";
+
 import { StairDocDashboard } from "@/components/dashboard";
 
 export default function Page() {
