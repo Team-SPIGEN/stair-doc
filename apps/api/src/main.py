@@ -1,9 +1,12 @@
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from src.api.api_v1.api import api_router
 from src.config import settings
+from src.core.socket import sio, start_telemetry_background_task
 
 info_router = APIRouter()
 
@@ -25,6 +28,13 @@ def custom_generate_unique_id(route: APIRoute):
     return f"{route.tags[0]}-{route.name}"
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan – start background tasks on startup."""
+    start_telemetry_background_task()
+    yield
+
+
 def get_application():
     _app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -32,6 +42,7 @@ def get_application():
         generate_unique_id_function=custom_generate_unique_id,
         root_path=settings.ROOT,
         root_path_in_servers=True,
+        lifespan=lifespan,
     )
 
     _app.include_router(api_router, prefix=settings.API_VERSION)
@@ -48,4 +59,9 @@ def get_application():
     return _app
 
 
-app = get_application()
+# Build the FastAPI app, then wrap it with Socket.IO ASGI app.
+# Socket.IO handles /socket.io/* ; everything else goes to FastAPI.
+import socketio as _socketio
+
+_fastapi_app = get_application()
+app = _socketio.ASGIApp(sio, other_asgi_app=_fastapi_app, socketio_path="/socket.io")

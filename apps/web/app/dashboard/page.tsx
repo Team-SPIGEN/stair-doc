@@ -1,44 +1,41 @@
 "use client";
 
-import { useState } from "react";
-import { useApi } from "@/hooks/use-api";
-import { fetchAllRobotStatus } from "@/lib/api/robot-status";
+import { useState, useEffect } from "react";
+import { useRobotSocket } from "@/hooks/use-robot-socket";
 import type { RobotStatusResponse } from "@/lib/api/robot-status";
 import {
   RobotStatusCard,
   LocationMap,
   EmergencyStopButton,
   DashboardError,
+  SystemHealth,
 } from "@/components/dashboard";
 import { BatteryGaugeCircular } from "@/components/dashboard/battery-gauge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Bot,
   Package,
   ArrowUpDown,
-  RefreshCw,
   Activity,
   MapPin,
   Gauge,
   Wifi,
   WifiOff,
+  Zap,
 } from "lucide-react";
-
-const POLL_INTERVAL = 5000; // 5s polling to keep data fresh
 
 export default function DashboardPage() {
   const [selectedRobotId, setSelectedRobotId] = useState<string | null>(null);
 
   const {
-    data,
-    isLoading,
-    error,
-    refetch,
-  } = useApi(() => fetchAllRobotStatus(), { pollInterval: POLL_INTERVAL });
+    isConnected,
+    robots,
+    systemHealth,
+    tickCount,
+    sendCommand,
+  } = useRobotSocket();
 
-  const robots = data?.robots ?? [];
   const selectedRobot = robots.find((r) => r.id === selectedRobotId) ?? null;
 
   // Derived stats
@@ -49,13 +46,9 @@ export default function DashboardPage() {
   const totalDeliveries = robots.reduce((s, r) => s + r.total_deliveries, 0);
   const totalStairs = robots.reduce((s, r) => s + r.stairs_climbed, 0);
 
-  // Loading skeleton
-  if (isLoading && robots.length === 0) {
-    return <DashboardSkeleton />;
-  }
-
-  if (error && robots.length === 0) {
-    return <DashboardError error={error} onRetry={refetch} />;
+  // Show skeleton only before the first telemetry tick
+  if (robots.length === 0 && tickCount === 0) {
+    return <DashboardSkeleton isConnected={isConnected} />;
   }
 
   return (
@@ -67,26 +60,34 @@ export default function DashboardPage() {
             Robot Status Dashboard
           </h1>
           <p className="text-muted-foreground text-sm">
-            Live status from <code className="text-xs">/api/v1/robot/status</code>
-            {data && (
+            Real-time via Socket.IO
+            {robots.length > 0 && (
               <> &middot; {robots.length} robot{robots.length !== 1 ? "s" : ""}</>
+            )}
+            {tickCount > 0 && (
+              <> &middot; tick #{tickCount}</>
             )}
           </p>
         </div>
+
+        {/* Connection indicator */}
         <div className="flex items-center gap-3">
-          {/* Connection indicator */}
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {error ? (
-              <WifiOff className="h-3.5 w-3.5 text-red-500" />
+          <span className="flex items-center gap-1.5 text-xs">
+            {isConnected ? (
+              <>
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                </span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">Live</span>
+              </>
             ) : (
-              <Wifi className="h-3.5 w-3.5 text-emerald-500" />
+              <>
+                <WifiOff className="h-3.5 w-3.5 text-red-500" />
+                <span className="text-red-500 font-medium">Disconnected</span>
+              </>
             )}
-            {error ? "Error" : "Live"}
           </span>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -98,12 +99,15 @@ export default function DashboardPage() {
         <QuickStat icon={Activity} label="Avg Battery" value={`${robots.length ? Math.round(robots.reduce((s, r) => s + r.battery.level, 0) / robots.length) : 0}%`} sub="Fleet average" />
       </div>
 
-      {/* Main content: Cards + Map */}
+      {/* Main content */}
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Robot Status Cards */}
         <div className="lg:col-span-3 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Bot className="h-5 w-5" /> Robot Fleet
+            {isConnected && (
+              <Zap className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
+            )}
           </h2>
           <div className="grid gap-4 sm:grid-cols-2">
             {robots.map((robot) => (
@@ -117,7 +121,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Right: Map + Selected Robot Details */}
+        {/* Right sidebar: Map + Details + System Health */}
         <div className="lg:col-span-2 space-y-4">
           {/* Location Map */}
           <LocationMap
@@ -131,7 +135,7 @@ export default function DashboardPage() {
             <SelectedRobotPanel
               robot={selectedRobot}
               onEmergencyStop={async () => {
-                console.log("Emergency stop:", selectedRobot.id);
+                sendCommand("emergency_stop", selectedRobot.id);
               }}
             />
           ) : (
@@ -144,6 +148,12 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* System Health */}
+          <SystemHealth
+            health={systemHealth}
+            isConnected={isConnected}
+          />
         </div>
       </div>
     </div>
@@ -239,12 +249,20 @@ function SelectedRobotPanel({
   );
 }
 
-function DashboardSkeleton() {
+function DashboardSkeleton({ isConnected }: { isConnected: boolean }) {
   return (
     <div className="space-y-6">
       <div>
         <Skeleton className="h-8 w-64" />
-        <Skeleton className="mt-2 h-4 w-48" />
+        <div className="mt-2 flex items-center gap-2">
+          <Skeleton className="h-4 w-48" />
+          {!isConnected && (
+            <span className="flex items-center gap-1 text-xs text-amber-500">
+              <Wifi className="h-3 w-3 animate-pulse" />
+              Connecting…
+            </span>
+          )}
+        </div>
       </div>
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -260,6 +278,7 @@ function DashboardSkeleton() {
         <div className="lg:col-span-2 space-y-4">
           <Skeleton className="h-80 rounded-lg" />
           <Skeleton className="h-48 rounded-lg" />
+          <Skeleton className="h-64 rounded-lg" />
         </div>
       </div>
     </div>
