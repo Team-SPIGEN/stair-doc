@@ -601,6 +601,41 @@ async def camera_stream_toggle(sid: str, data: dict) -> None:
     print(f"[Socket.IO] Camera stream {action}: {robot_id}")
 
 
+@sio.event
+async def voice_command(sid: str, data: dict) -> None:
+    """Handle real-time voice commands sent directly over WebSocket.
+
+    Lightweight alternative to the REST endpoint: broadcasts voice_activity
+    so all clients see who sent what.  Actual command execution should still
+    go through POST /api/v1/voice/command for full NLP + safety checks.
+    """
+    text = data.get("text", "")
+    robot_id = data.get("robotId", "robot-001")
+    role = data.get("role", "operator")
+    now = datetime.utcnow().isoformat()
+
+    # Broadcast so all connected clients see the live activity
+    await sio.emit("voice_activity", {
+        "text": text,
+        "robot_id": robot_id,
+        "role": role,
+        "action": "unknown",
+        "executed": False,
+        "message": f"Voice input received from {role}",
+        "timestamp": now,
+    })
+
+    # Ack back to sender
+    await sio.emit("command_ack", {
+        "action": "voice_command",
+        "robot_id": robot_id,
+        "status": "received",
+        "timestamp": now,
+    }, to=sid)
+
+    print(f"[Socket.IO] Voice command from {sid}: \"{text}\" → {robot_id}")
+
+
 async def broadcast_new_photo(photo_data: dict) -> None:
     """Broadcast a new_photo event to all connected clients.
 

@@ -21,7 +21,11 @@ bcrypt = ">=4.0.0"
 isort = "^5.13.2"
 black = "^24.10.0"
 pytest = "^8.4.2"
+pytest-asyncio = ">=0.23"
 pylint-pydantic = "^0.4.1"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

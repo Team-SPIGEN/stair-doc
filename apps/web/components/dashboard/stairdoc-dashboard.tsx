@@ -28,6 +28,8 @@ import {
   ChevronRight,
   MapPin,
 } from "lucide-react";
+import { VoiceControl } from "@/components/voice/voice-control";
+import type { VoiceCommandResponse } from "@/lib/api/voice";
 
 /** Monotonic counter for unique event IDs. */
 let _seq = 0;
@@ -48,6 +50,28 @@ export function StairDocDashboard() {
       message: data.message,
       timestamp: data.timestamp,
       severity: data.type === "emergency_stop" ? "error" : "info",
+    };
+    setActivities((prev) => [event, ...prev].slice(0, 50));
+  }, []);
+
+  // Track voice commands as activity events
+  const handleVoiceCommand = useCallback((response: VoiceCommandResponse) => {
+    const event: ActivityEvent = {
+      id: nextId(),
+      type: response.intent.action === "emergency_stop" ? "alert" : "system",
+      message: `[Voice] ${response.message}`,
+      timestamp: response.timestamp,
+      severity:
+        response.intent.action === "emergency_stop"
+          ? "error"
+          : response.executed
+          ? "success"
+          : "warning",
+      metadata: {
+        action: response.intent.action,
+        floor: response.intent.target_floor ?? undefined,
+        confidence: response.intent.confidence,
+      },
     };
     setActivities((prev) => [event, ...prev].slice(0, 50));
   }, []);
@@ -189,7 +213,6 @@ export function StairDocDashboard() {
                 robotName={selectedRobot?.name}
               />
             </Card>
-
             {/* Selected Robot Battery */}
             {selectedRobot ? (
               <Card>
@@ -224,6 +247,13 @@ export function StairDocDashboard() {
               </Card>
             )}
           </div>
+
+          <VoiceControl
+            robotId={selectedRobot?.id ?? "robot-001"}
+            role="operator"
+            title="Voice Commands"
+            onCommand={handleVoiceCommand}
+          />
 
           {/* Activity Feed */}
           <ActivityFeed activities={activities} maxItems={8} />
