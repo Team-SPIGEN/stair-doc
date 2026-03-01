@@ -5,6 +5,7 @@ from src.api.api_v1.endpoints import (
 	camera,
 	deliveries,
 	navigation,
+	notifications,
 	rfid,
 	robots,
 	voice,
@@ -19,3 +20,4 @@ api_router.include_router(rfid.router)
 api_router.include_router(camera.router)
 api_router.include_router(navigation.router)
 api_router.include_router(voice.router)
+api_router.include_router(notifications.router)

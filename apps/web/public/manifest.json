@@ -1,13 +1,15 @@
 {
-  "name": "Stair-Doc Robot Control",
-  "short_name": "Stair-Doc",
-  "description": "Control and monitor stair-climbing delivery robots",
+  "name": "StairDoc Robot Control",
+  "short_name": "StairDoc",
+  "description": "Autonomous stair-climbing delivery robot — monitor, control and receive deliveries",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#3b82f6",
   "orientation": "portrait-primary",
   "scope": "/",
+  "lang": "en-US",
+  "categories": ["productivity", "utilities"],
   "icons": [
     {
       "src": "/icons/icon-72x72.png",
@@ -57,6 +59,29 @@
     }
   ],
   "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Live robot telemetry dashboard",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icons/shortcut-robot.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Deliveries",
+      "short_name": "Deliveries",
+      "description": "Delivery queue and status",
+      "url": "/deliveries",
+      "icons": [{ "src": "/icons/shortcut-deliveries.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "RFID Unlock",
+      "short_name": "RFID",
+      "description": "Unlock delivery container",
+      "url": "/rfid",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    }
+  ],
   "screenshots": [
     {
       "src": "/screenshots/dashboard.png",

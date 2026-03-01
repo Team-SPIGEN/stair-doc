@@ -7,6 +7,7 @@ import { OpenAPI } from "@/lib/api/client";
 import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { OfflineIndicator } from "@/components/ui/offline-indicator";
 import { AuthAwareLayout } from "@/components/layouts/auth-aware-layout";
+import { InstallPromptBanner } from "@/components/pwa/install-prompt";
 
 export const fontSans = FontSans({
   subsets: ["latin"],
@@ -66,6 +67,7 @@ export default function RootLayout({
         >
           <OfflineIndicator />
           <AuthAwareLayout>{children}</AuthAwareLayout>
+          <InstallPromptBanner />
           <TailwindIndicator />
         </ThemeProvider>
       </body>
