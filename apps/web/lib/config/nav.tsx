@@ -1,8 +1,22 @@
 import { Icons } from "@/components/icons";
+import type { UserRole } from "@/types/auth";
 
-export type NavConfig = typeof navConfig;
+export type NavLink = {
+  icon: React.ReactNode;
+  iconMobile: React.ReactNode;
+  label: string;
+  href: string;
+  pageTitle: string;
+  navLocation: "top" | "bottom";
+  /** Roles that can see this link.  Omit or empty → visible to everyone. */
+  roles?: UserRole[];
+};
 
-export const navConfig = {
+export type NavConfig = {
+  navLinks: NavLink[];
+};
+
+export const navConfig: NavConfig = {
   navLinks: [
     {
       icon: <Icons.home className="h-5 w-5" />,
@@ -11,6 +25,7 @@ export const navConfig = {
       href: "/",
       pageTitle: "Stair-Doc Dashboard",
       navLocation: "top",
+      // All roles can see Overview
     },
     {
       icon: <Icons.performance className="h-5 w-5" />,
@@ -19,6 +34,7 @@ export const navConfig = {
       href: "/dashboard",
       pageTitle: "Robot Status Dashboard",
       navLocation: "top",
+      roles: ["operator", "admin"],
     },
     {
       icon: <Icons.rules className="h-5 w-5" />,
@@ -27,6 +43,7 @@ export const navConfig = {
       href: "/deliveries",
       pageTitle: "Delivery Queue",
       navLocation: "top",
+      // All roles can see Deliveries
     },
     {
       icon: <Icons.creditCard className="h-5 w-5" />,
@@ -35,6 +52,7 @@ export const navConfig = {
       href: "/rfid",
       pageTitle: "RFID Control",
       navLocation: "top",
+      // All roles can see RFID
     },
     {
       icon: <Icons.camera className="h-5 w-5" />,
@@ -43,6 +61,7 @@ export const navConfig = {
       href: "/camera",
       pageTitle: "Live Robot Camera",
       navLocation: "top",
+      // All roles can see Camera
     },
     {
       icon: <Icons.image className="h-5 w-5" />,
@@ -51,6 +70,7 @@ export const navConfig = {
       href: "/camera/gallery",
       pageTitle: "Photo Gallery",
       navLocation: "top",
+      roles: ["operator", "admin"],
     },
     {
       icon: <Icons.gamepad className="h-5 w-5" />,
@@ -59,6 +79,16 @@ export const navConfig = {
       href: "/navigation",
       pageTitle: "Navigation Controls",
       navLocation: "top",
+      roles: ["operator", "admin"],
+    },
+    {
+      icon: <Icons.settings className="h-5 w-5" />,
+      iconMobile: <Icons.settings className="h-5 w-5" />,
+      label: "Settings",
+      href: "/settings",
+      pageTitle: "Settings",
+      navLocation: "bottom",
+      roles: ["operator", "admin"],
     },
     {
       icon: <Icons.file className="h-5 w-5" />,

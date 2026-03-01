@@ -2,6 +2,7 @@ import { FC } from "react";
 import { usePathname } from "next/navigation";
 import LinkComponent from "./NavLink";
 import { navConfig } from "@/lib/config/";
+import { useAuth } from "@/contexts/auth-context";
 
 type NavLinksProps = {
   collapsed: boolean;
@@ -10,11 +11,19 @@ type NavLinksProps = {
 
 const NavLinks: FC<NavLinksProps> = ({ collapsed, animationDuration }) => {
   const pathName = usePathname();
+  const { role } = useAuth();
+
+  // Filter nav links based on the current user's role
+  const visibleLinks = navConfig.navLinks.filter((link) => {
+    if (!link.roles || link.roles.length === 0) return true;
+    if (!role) return false;
+    return link.roles.includes(role);
+  });
 
   return (
     <div className="flex h-full flex-col justify-between">
       <div id="topNavLinks">
-        {navConfig.navLinks.map((link, index) => {
+        {visibleLinks.map((link, index) => {
           if (link.navLocation === "top") {
             const activeLink = pathName === link.href;
 
@@ -38,7 +47,7 @@ const NavLinks: FC<NavLinksProps> = ({ collapsed, animationDuration }) => {
       </div>
 
       <div id="btmNavLinks">
-        {navConfig.navLinks.map((link, index) => {
+        {visibleLinks.map((link, index) => {
           if (link.navLocation === "bottom") {
             const activeLink = pathName === link.href;
 

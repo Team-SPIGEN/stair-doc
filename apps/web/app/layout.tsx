@@ -1,13 +1,12 @@
 import "./globals.css";
 import type { Metadata, Viewport } from "next";
 import { Inter as FontSans } from "next/font/google";
-import { DashboardLayout } from "@/components/layouts/dashboard";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { OpenAPI } from "@/lib/api/client";
 import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { OfflineIndicator } from "@/components/ui/offline-indicator";
-import { GlobalEmergencyStop } from "@/components/dashboard/global-emergency-stop";
+import { AuthAwareLayout } from "@/components/layouts/auth-aware-layout";
 
 export const fontSans = FontSans({
   subsets: ["latin"],
@@ -66,8 +65,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <OfflineIndicator />
-          <DashboardLayout>{children}</DashboardLayout>
-          <GlobalEmergencyStop />
+          <AuthAwareLayout>{children}</AuthAwareLayout>
           <TailwindIndicator />
         </ThemeProvider>
       </body>

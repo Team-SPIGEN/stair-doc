@@ -26,5 +26,13 @@ class Settings(BaseSettings):
     API_VERSION: str = "/api/v1"
     ROOT: str = ROOT_PATH
 
+    # ── JWT auth ──────────────────────────────────────────────────────────
+    JWT_SECRET_KEY: str = os.getenv(
+        "JWT_SECRET_KEY",
+        "stairdoc-dev-secret-key-change-in-production-min-32-chars!",
+    )
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRATION_DAYS: int = 20
+
 
 settings = Settings()
