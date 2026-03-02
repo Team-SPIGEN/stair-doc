@@ -73,6 +73,15 @@ export const navConfig: NavConfig = {
       roles: ["operator", "admin"],
     },
     {
+      icon: <Icons.analytics className="h-5 w-5" />,
+      iconMobile: <Icons.analytics className="h-5 w-5" />,
+      label: "Analytics",
+      href: "/analytics",
+      pageTitle: "Robot Performance Analytics",
+      navLocation: "top",
+      roles: ["admin"],
+    },
+    {
       icon: <Icons.gamepad className="h-5 w-5" />,
       iconMobile: <Icons.gamepad className="h-5 w-5" />,
       label: "Navigation",

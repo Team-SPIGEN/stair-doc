@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from src.api.api_v1.endpoints import (
+	analytics,
 	auth,
 	camera,
 	deliveries,
@@ -21,3 +22,4 @@ api_router.include_router(camera.router)
 api_router.include_router(navigation.router)
 api_router.include_router(voice.router)
 api_router.include_router(notifications.router)
+api_router.include_router(analytics.router)
