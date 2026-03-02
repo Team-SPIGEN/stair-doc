@@ -16,7 +16,9 @@ import {
   Upload,
   CheckCircle2,
   AlertCircle,
+  Camera,
 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { CameraViewer } from "@/components/camera/camera-viewer";
 import { PhotoGallery } from "@/components/camera/photo-gallery";
 import {
@@ -200,15 +202,11 @@ function UploadPanel() {
 export default function CameraPage() {
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-          Live Robot Camera
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Live camera streams, snapshots, and photo uploads from robot cameras
-        </p>
-      </div>
+      <PageHeader
+        icon={Camera}
+        title="Live Robot Camera"
+        description="Live camera streams, snapshots, and photo uploads from robot cameras"
+      />
 
       {/* Live Viewer + Upload side-by-side */}
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">

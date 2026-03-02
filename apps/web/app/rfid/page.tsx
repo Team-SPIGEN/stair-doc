@@ -18,6 +18,7 @@ import {
   Users,
   Activity,
 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { RFIDScanner } from "@/components/rfid/rfid-scanner";
 import { RFIDTable } from "@/components/rfid/rfid-table";
 import {
@@ -154,23 +155,12 @@ export default function RFIDPage() {
 
   return (
     <div className="space-y-6">
-      {/* ── Header ──────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            RFID Control
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage container access, scan RFID tags, and view access logs
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={socketConnected ? "success" : "destructive"}>
-            <Radio className="mr-1 h-3 w-3" />
-            {socketConnected ? "Live" : "Disconnected"}
-          </Badge>
-        </div>
-      </div>
+      <PageHeader
+        icon={CreditCard}
+        title="RFID Control"
+        description="Manage container access, scan RFID tags, and view access logs"
+        badge={socketConnected ? "Live" : undefined}
+      />
 
       {/* ── Stat Cards ──────────────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

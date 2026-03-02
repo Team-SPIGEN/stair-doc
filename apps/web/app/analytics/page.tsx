@@ -20,7 +20,9 @@ import {
   Download,
   TrendingUp,
   Clock,
+  BarChart2,
 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 import { DateRangePicker } from "@/components/analytics/date-range-picker";
 import { DeliveryTrendChart } from "@/components/analytics/delivery-trend-chart";
 import { DeliverySuccessGauge } from "@/components/analytics/delivery-success-gauge";
@@ -128,45 +130,30 @@ export default function AnalyticsPage() {
 
   return (
     <div className="space-y-6 pb-8">
-      {/* ── Header ────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Robot Performance Analytics
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Stair-climbing delivery metrics · {days}-day window
-            {selectedFloor && (
-              <span className="ml-2">
-                ·{" "}
-                <button
-                  onClick={() => setSelectedFloor(null)}
-                  className="underline underline-offset-2"
-                >
-                  Floor {selectedFloor} only ✕
-                </button>
+      <PageHeader
+        icon={BarChart2}
+        title="Robot Performance Analytics"
+        description={`Stair-climbing delivery metrics · ${days}-day window${selectedFloor ? ` · Floor ${selectedFloor} only` : ""}`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {lastUpdated && (
+              <span className="hidden text-xs text-white/70 sm:inline">
+                Updated {lastUpdated.toLocaleTimeString()}
               </span>
             )}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {lastUpdated && (
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              Updated {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
-          <DateRangePicker value={days} onChange={handleDaysChange} />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refresh}
-            className="gap-1.5 min-h-[36px]"
-          >
-            <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-            Refresh
-          </Button>
-        </div>
-      </div>
+            <DateRangePicker value={days} onChange={handleDaysChange} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refresh}
+              className="gap-1.5 bg-white/20 hover:bg-white/30 text-white border-white/30"
+            >
+              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
+        }
+      />
 
       {/* ── Error banner ──────────────────────────────────────────────── */}
       {error && (

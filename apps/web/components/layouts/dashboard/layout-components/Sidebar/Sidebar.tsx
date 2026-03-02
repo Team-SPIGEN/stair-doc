@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Icons } from "@/components/icons";
 import { motion } from "framer-motion";
+import { Bot } from "lucide-react";
 import NavLinks from "./NavLinks";
 
 const Sidebar = () => {
@@ -50,11 +51,13 @@ const Sidebar = () => {
             }}
             transition={{ duration: animationDuration }}
           >
-            <div className="flex flex-row items-center gap-1 font-semibold text-sm text-foreground">
-              <span>
-                <Icons.logo className="h-5" />
+            <div className="flex flex-row items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-purple-600">
+                <Bot className="h-4 w-4 text-white" />
+              </div>
+              <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-sm font-bold text-transparent">
+                Stair-Doc
               </span>
-              Next-Fast-Turbo
             </div>
           </motion.div>
         </Link>

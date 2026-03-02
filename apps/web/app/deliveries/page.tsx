@@ -9,6 +9,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
+import { Package } from "lucide-react";
 import {
   DeliveryTable,
   DeliveryForm,
@@ -87,23 +89,20 @@ export default function DeliveriesPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-            Delivery Queue
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Manage and track all robot deliveries
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowForm((prev) => !prev)}
-          className="min-h-[44px] touch-manipulation w-full sm:w-auto"
-        >
-          {showForm ? "Cancel" : "+ New Delivery"}
-        </Button>
-      </div>
+      <PageHeader
+        icon={Package}
+        title="Delivery Queue"
+        description="Manage and track all robot deliveries in real-time"
+        actions={
+          <Button
+            onClick={() => setShowForm((prev) => !prev)}
+            className="min-h-[44px] touch-manipulation bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm"
+            variant="outline"
+          >
+            {showForm ? "Cancel" : "+ New Delivery"}
+          </Button>
+        }
+      />
 
       {/* Create form (collapsible) */}
       {showForm && (

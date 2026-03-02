@@ -1,19 +1,20 @@
 ---
 title: Documentation config
 "og:title": Mintlify setup and configuration
-description: Mintlify setup and configuration
+description: Mintlify setup and configuration for the Stair-Doc docs site
 ---
 
 ## Introduction
 
-The documentation site is built entirely using Mintlify. Mintlify docs are rendered from MDX files and configurations. Mintlify works with a Github integration to
-constantly build an independent docs site based off your latest published repository.
+Stair-Doc's documentation is built with [Mintlify](https://mintlify.com/). MDX files in `apps/docs/` are rendered into a fully interactive docs site.
 
-Documentation can be edited in raw MDX, or directly through the Mintlify dashboard (which stays in sync with your local Github repo).
+The docs site stays in sync with the repository via a GitHub integration — push to `main` and Mintlify rebuilds automatically.
 
-Mintlify is fast to setup and provides tonnes of features out-the-box without the need to pay for a subscription for the basic services.
+Run the **docs site only** from `apps/docs`:
 
-You can run the **docs site only** by running the `pnpm run dev` command from a terminal within the `docs` directory.
+```bash
+pnpm run dev
+```
 
 ## Docs structure
 
@@ -71,20 +72,36 @@ your API have been made and published.
 navigation object suggestion:
 [
   {
-    "group": "users",
+    "group": "Authentication",
     "pages": [
-      "api/users/get-user",
-      "api/users/get-all-users",
-      "api/users/search-users",
-      "api/users/create-user"
+      "api/auth/login",
+      "api/auth/register",
+      "api/auth/me"
     ]
   },
   {
-    "group": "spells",
+    "group": "Robots",
     "pages": [
-      "api/spells/get-spell",
-      "api/spells/get-all-spells",
-      "api/spells/search-spells"
+      "api/robots/get-status",
+      "api/robots/get-telemetry"
+    ]
+  },
+  {
+    "group": "Deliveries",
+    "pages": [
+      "api/deliveries/get-all-deliveries",
+      "api/deliveries/get-delivery",
+      "api/deliveries/create-delivery",
+      "api/deliveries/update-delivery",
+      "api/deliveries/delete-delivery"
+    ]
+  },
+  {
+    "group": "RFID",
+    "pages": [
+      "api/rfid/scan",
+      "api/rfid/get-tags",
+      "api/rfid/assign-tag"
     ]
   }
 ]
@@ -110,7 +127,6 @@ For sake of simplicity, copy this navigation object suggestion and add it your `
   {
     "group": "Deployment",
     "pages": [
-      "documentation/deployment/vercel",
       "documentation/deployment/deployment"
     ]
   },
@@ -119,23 +135,40 @@ For sake of simplicity, copy this navigation object suggestion and add it your `
     "pages": ["api/introduction"]
   },
   {
-    "group": "Users",
+    "group": "Authentication",
     "pages": [
-      "api/users/get-user",
-      "api/users/get-all-users",
-      "api/users/search-users",
-      "api/users/create-user"
+      "api/auth/login",
+      "api/auth/register",
+      "api/auth/me"
     ]
   },
   {
-    "group": "Spells",
+    "group": "Robots",
     "pages": [
-      "api/spells/get-spell",
-      "api/spells/get-all-spells",
-      "api/spells/search-spells"
+      "api/robots/get-status",
+      "api/robots/get-telemetry"
+    ]
+  },
+  {
+    "group": "Deliveries",
+    "pages": [
+      "api/deliveries/get-all-deliveries",
+      "api/deliveries/get-delivery",
+      "api/deliveries/create-delivery",
+      "api/deliveries/update-delivery",
+      "api/deliveries/delete-delivery"
+    ]
+  },
+  {
+    "group": "RFID",
+    "pages": [
+      "api/rfid/scan",
+      "api/rfid/get-tags",
+      "api/rfid/assign-tag"
     ]
   }
 ],
+
 ```
 
   </Step>
@@ -145,7 +178,7 @@ For sake of simplicity, copy this navigation object suggestion and add it your `
     ```json
     {
       ...
-      "openapi":"https://next-fast-turbo-api.vercel.app/openapi.json"
+      "openapi":"https://YOUR-RAILWAY-URL.railway.app/openapi.json"
       ...
     }
     ```

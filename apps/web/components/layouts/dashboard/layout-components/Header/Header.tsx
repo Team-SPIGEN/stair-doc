@@ -7,6 +7,13 @@ import { SidebarMobile } from "../../layout-components";
 import { useAuth } from "@/contexts/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Keyboard } from "lucide-react";
 
 const ROLE_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
   admin: "default",
@@ -42,6 +49,25 @@ const Header = () => {
             </Button>
           </div>
         )}
+        {/* Keyboard shortcuts hint */}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="hidden sm:flex h-8 w-8 text-muted-foreground" aria-label="Keyboard shortcuts">
+                <Keyboard className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs p-3">
+              <p className="font-semibold text-xs mb-2">Keyboard Shortcuts</p>
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Emergency Stop</span><kbd className="rounded bg-muted px-1 font-mono">Space (hold)</kbd></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Toggle sidebar</span><kbd className="rounded bg-muted px-1 font-mono">Ctrl+B</kbd></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Dashboard</span><kbd className="rounded bg-muted px-1 font-mono">G D</kbd></div>
+                <div className="flex justify-between gap-4"><span className="text-muted-foreground">Deliveries</span><kbd className="rounded bg-muted px-1 font-mono">G L</kbd></div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <div className="block sm:hidden">
           <SidebarMobile />
         </div>

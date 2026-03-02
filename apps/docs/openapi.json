@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "FastAPI App",
-    "description": "A simple FastAPI app",
-    "version": "0.1.0"
+    "title": "Stair-Doc API",
+    "description": "Autonomous stair-climbing delivery robot control API",
+    "version": "1.0.0"
   },
   "servers": [
     {

@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { Joystick } from "@/components/navigation/joystick";
 import { LidarViz } from "@/components/navigation/lidar-viz";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   useNavigationSocket,
   type NavStatusPayload,
@@ -263,7 +264,12 @@ export default function NavigationPage() {
           </Card>
         </div>
       )}
-
+      <PageHeader
+        icon={Navigation}
+        title="Navigation Controls"
+        description="Manual joystick, autonomous navigation, and LIDAR visualization"
+        badge={isConnected ? "Live" : undefined}
+      />
       {/* ── Header Row ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">

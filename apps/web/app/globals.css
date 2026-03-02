@@ -74,6 +74,20 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /* Glassmorphism card */
+  .glass-card {
+    @apply backdrop-blur-md bg-card/80 border-border/50 shadow-sm;
+  }
+
+  .glass-card-strong {
+    @apply backdrop-blur-xl bg-card/60 border-white/10 shadow-lg;
+  }
+
+  /* Gradient text utility */
+  .gradient-text {
+    @apply bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent;
+  }
 }
 
 /* RFID scanner animations */

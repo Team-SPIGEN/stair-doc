@@ -24,6 +24,7 @@ import {
   WifiOff,
   Zap,
 } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default function DashboardPage() {
   const [selectedRobotId, setSelectedRobotId] = useState<string | null>(null);
@@ -53,43 +54,29 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-            Robot Status Dashboard
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Real-time via Socket.IO
-            {robots.length > 0 && (
-              <> &middot; {robots.length} robot{robots.length !== 1 ? "s" : ""}</>
-            )}
-            {tickCount > 0 && (
-              <> &middot; tick #{tickCount}</>
-            )}
-          </p>
-        </div>
-
-        {/* Connection indicator */}
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs">
+      <PageHeader
+        icon={Bot}
+        title="Robot Status Dashboard"
+        description={`Real-time telemetry via Socket.IO${robots.length > 0 ? ` · ${robots.length} robot${robots.length !== 1 ? "s" : ""}` : ""}${tickCount > 0 ? ` · tick #${tickCount}` : ""}`}
+        actions={
+          <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium backdrop-blur-sm">
             {isConnected ? (
               <>
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="inline-flex h-2 w-2 rounded-full bg-emerald-300" />
                 </span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium">Live</span>
+                <span className="text-white">Live</span>
               </>
             ) : (
               <>
-                <WifiOff className="h-3.5 w-3.5 text-red-500" />
-                <span className="text-red-500 font-medium">Disconnected</span>
+                <WifiOff className="h-3 w-3 text-red-300" />
+                <span className="text-red-200">Offline</span>
               </>
             )}
           </span>
-        </div>
-      </div>
+        }
+      />
 
       {/* Quick Stats */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">

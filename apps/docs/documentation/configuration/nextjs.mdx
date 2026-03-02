@@ -1,78 +1,106 @@
 ---
 title: Next.js config
 "og:title": "Next.js config and setup"
-"description": "Next.js config and setup"
+"description": "Next.js config and setup for the Stair-Doc dashboard"
 ---
 
 ## Introduction
 
-The frontend uses the latest version of Next.js and TypeScript; it is configured using the latest [app router](https://nextjs.org/docs/app).
+The Stair-Doc frontend is a **Next.js 15 Progressive Web App** using the App Router, React 18, TypeScript, Tailwind CSS, and shadcn/ui. It is designed as a **mobile-first** installable PWA for controlling the delivery robot.
 
-You can run the **frontend only** by running the `pnpm run dev` command from a terminal within the `web` directory. Alternatively, you can run the entire application by running `pnpm run dev` from the **root directory**.
+Run the **frontend only** from `apps/web`:
+
+```bash
+pnpm run dev
+```
 
 ## App structure
-
-The app root directory is structured as follows:
 
 ```
 web
 ├── app
+│   ├── (auth) auth/          Login / register page
+│   ├── analytics/            Robot performance charts
+│   ├── camera/               Live camera feed + gallery
+│   ├── dashboard/            Live telemetry overview
+│   ├── deliveries/           Delivery queue CRUD
+│   ├── install/              PWA install prompt page
+│   ├── navigation/           LIDAR map + robot controls
+│   ├── rfid/                 RFID scanner + tag events
+│   ├── settings/             User preferences and shortcuts
+│   ├── globals.css
+│   └── layout.tsx
 ├── components
+│   ├── ui/                   shadcn/ui primitives + PageHeader
+│   ├── layouts/              Dashboard layout, sidebar, header
+│   ├── features/             Domain components (robot, delivery, rfid)
+│   └── theme/                ThemeProvider + ModeToggle
+├── contexts
+│   └── auth-context.tsx      JWT auth state + useAuth hook
+├── hooks
+│   ├── use-robot-socket.ts   Socket.IO live telemetry
+│   ├── use-keyboard-shortcuts.ts  Space=E-STOP, Ctrl+B etc.
+│   └── use-online-status.ts  PWA offline detection
 ├── lib
+│   ├── api/client/           Auto-generated TypeScript API client
+│   ├── socket/client.ts      Socket.IO client singleton
+│   ├── config/               Nav config and site settings
+│   └── utils.ts              cn() and shared helpers
+├── types
+│   ├── auth.ts               UserRole, AuthUser
+│   ├── delivery.ts           Delivery, DeliveryStatus
+│   ├── socket.ts             RobotTelemetry, RFIDScanEvent
+│   └── api.ts                ApiResponse, PaginatedResponse
 ├── public
-├── .env
-├── .env.example
-├── .eslintrc.js
-├── components.json
+│   ├── icons/                PWA icons (192, 512, maskable)
+│   └── sw.js                 Generated service worker
+├── .env.local
 ├── next.config.js
-├── package.json
-├── postcss.config.js
-├── README.md
 ├── tailwind.config.js
-├── tsconfig.json
-└── yarn.lock
+└── tsconfig.json
 ```
 
 #### App
 
-| Item        | Description                                                                                          |
-| ----------- | ---------------------------------------------------------------------------------------------------- |
-| globals.css | Tailwind global config. Uses a generated theme from [ShadCN UI themes](https://ui.shadcn.com/themes) |
-| layout.tsx  | App layout                                                                                           |
-| page.tsx    | Landing page                                                                                         |
+| Item                  | Description                                                           |
+| --------------------- | --------------------------------------------------------------------- |
+| `globals.css`         | Tailwind global config + PWA safe-area and glassmorphism utilities    |
+| `layout.tsx`          | Root layout — wires Toaster, KeyboardShortcutsProvider, ErrorBoundary |
+| `dashboard/page.tsx`  | Live telemetry with Socket.IO                                         |
+| `deliveries/page.tsx` | Delivery queue with CRUD forms                                        |
+| `rfid/page.tsx`       | RFID scan monitor                                                     |
+| `navigation/page.tsx` | LIDAR map + robot joystick controls                                   |
+| `analytics/page.tsx`  | Multi-chart robot utilisation dashboard                               |
+| `settings/page.tsx`   | User preferences, role info, keyboard shortcuts reference             |
 
 #### Components
 
-| Item    | Description                                                                                                                   |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| layouts | The dashboard layout is stored which wraps the application `{children}` in `root/app/layout.tsx`                              |
-| theme   | The `ThemeProvider` component(s) that wrap the application.                                                                   |
-| ui      | Where `ShadCN` components are stored upon being generated. Configured by the `components.json` located in the `frontend root` |
-| \*.tsx   | Components used within the application                                                                                        |
+| Item              | Description                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- |
+| `layouts/`        | Dashboard shell: sidebar (collapsible + mobile drawer), header with user badge + keyboard shortcut tooltip |
+| `ui/`             | shadcn/ui primitives + custom `PageHeader`, `DashboardCard`, `ErrorBoundary`                               |
+| `features/robot/` | `GlobalEmergencyStop` — floating E-STOP button with full-screen overlay and vibration API                  |
+| `theme/`          | `ThemeProvider` and `ModeToggle` (dark/light)                                                              |
 
 #### Lib
-| Item        | Description                                                                                                      |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| api         | The output generated by the `openapi` npm package. Configured in the `package.json` task named `generate-client` |
-| config      | Stores site config. Currently contains the setup for sidebar navigation                                          |
-| twConfig.ts | Tailwind colour config exported to an accessible Object. Used for assigning theme-aware colours in charts        |
-| utils.ts    | ShadCN utils                                                                                                     |
 
-
+| Item               | Description                                                  |
+| ------------------ | ------------------------------------------------------------ |
+| `api/client/`      | Auto-generated TypeScript client from FastAPI OpenAPI schema |
+| `socket/client.ts` | Socket.IO singleton used by `useRobotSocket` hook            |
+| `config/nav.tsx`   | Sidebar navigation links with role-based visibility          |
+| `utils.ts`         | `cn()` (Tailwind class merge) and shared helpers             |
 
 ## TypeScript from FastAPI
-As FastAPI is based on the OpenAPI specification, you get automatic compatibility with many tools, including the automatic API docs (provided by Swagger UI).
 
-One particular advantage that is not necessarily obvious is that you can generate clients (sometimes called SDKs ) for your API, for many different programming languages.
+As FastAPI exposes an OpenAPI schema, you can generate a fully-typed TypeScript client for the frontend. This ensures the frontend and backend stay in sync with zero manual type duplication.
 
-<Note>For a more detailed explanation, see the [official FastAPI documentation](https://fastapi.tiangolo.com/advanced/generate-clients/#generate-a-typescript-client-with-the-preprocessed-openapi)</Note>
-
-## Why generate TypeScript?
-Generating a TypeScript client for your FastAPI backend is a great way to ensure that your frontend and backend are always in sync. It is also a way to provide type hinting while writing your frontend code without needing a permanent reference to the API, or re-creating the schema using something like Zod.
-
-<Frame caption="Type hinting from the generated API client"><img src="/_images/type-hinting.png" /></Frame>
+<Frame caption="Type hinting from the generated API client">
+  <img src="/_images/type-hinting.png" />
+</Frame>
 
 ### How to generate TypeScript
+
 <Steps>
     <Step title="Configure and run generate-client task">
     There are two generate-client tasks configured in the `package.json`:
@@ -84,11 +112,7 @@ Generating a TypeScript client for your FastAPI backend is a great way to ensure
       ...
     },
     ```
-    The `generate-client` task is set to run off the production OpenAPI schema.\
-    \
-    The `generate-client:dev` task is set to use the localhost OpenAPI schema. This is useful for development, as it will use the latest schema from the backend.
-
-    Ensure your production API URL is configured, or that your local API URL is correct, and then run the relevant task.
+    The `generate-client` task targets the production URL; `generate-client:dev` targets localhost. Run whichever matches your current environment.
     </Step>
     
     <Step title="Update your root layout">
@@ -97,80 +121,38 @@ Generating a TypeScript client for your FastAPI backend is a great way to ensure
 
     ```tsx lib/api/client/core/OpenAPI.ts
     export const OpenAPI: OpenAPIConfig = {
-      BASE: "http://127.0.0.0:8000",
+      BASE: "http://localhost:8000",
       VERSION: "0.1.0",
-      WITH_CREDENTIALS: false,
-      CREDENTIALS: "include",
-      TOKEN: undefined,
-      USERNAME: undefined,
-      PASSWORD: undefined,
-      HEADERS: undefined,
-      ENCODE_PATH: undefined,
+      ...
     };
     ```
 
-    The problem with this is that we would want to differentiate between which API is being used. When the TypeScript is generated, the given OpenAPI URL is used as the base URL for the API. 
-    This is not ideal for production, as you would want to use the production API URL, and vice versa in development.
-
-    You can override this by adding the following to your root `layout.tsx` file:
+    Override this in the root `layout.tsx` so the correct backend URL is used in each environment:
 
     ```tsx layout.tsx
     import { OpenAPI } from "@/lib/api/client";
 
     if (process.env.NODE_ENV === "production") {
-      OpenAPI.BASE = "https://next-fast-turbo.vercel.app"
+      OpenAPI.BASE = process.env.NEXT_PUBLIC_API_URL ?? "https://your-railway-app.railway.app";
     }
-
     ```
 
 
     </Step>
+
 </Steps>
 
-## Using the generated API
-Once you have generated your TypeScript interface to your API, you can use it in your frontend code.
+## Using the generated API client
 
-In its simplest form, you can import the generated API and use it as below:
-
-```tsx
-import { UsersService } from "@/lib/api/client";
-
-const response = await UsersService.usersSearchUsers({
-        keyword: "keyword",
-        searchOn: "searchOn",
-        maxResults: "maxResults",
-      });
-```
-
-You can see this code being used in the `components/search-users.tsx` file, as part of the form's onSubmit function:
+Once generated, import service classes directly in your components:
 
 ```tsx
-  const onSubmit = async (data: z.infer<typeof FormSchema>) => {
-    try {
-      const maxResults = data.searchResults ? parseInt(data.searchResults) : 10;
-      const response = await UsersService.usersSearchUsers({
-        keyword: data.keyword,
-        searchOn: data.searchOn,
-        maxResults: maxResults,
-      });
-      setSearchResults(response);
-      setError(null);
-    } catch (error) {
-      setSearchResults({ results: [] });
-      setError(error);
-    }
-  };
-```
-This code also imports the `UserSearchResults` type which is used to set the state of the search results:
-```tsx
-import { UsersService, UserSearchResults } from "@/lib/api/client";
+import { DeliveriesService } from "@/lib/api/client";
 
-const [searchResults, setSearchResults] = React.useState<UserSearchResults>({
-    results: [],
-  });
+const deliveries = await DeliveriesService.deliveriesGetAllDeliveries();
 ```
 
-
-## Important considerations
-- If you make changes to your API, you will need to re-generate the TypeScript interface.
-- Re-generating this interface will overwrite the existing files. If you want to modify anything (e.g. `api/client/core/OpenAPI.ts`) and have it persist, do this outside of the generated files. You can see this in action in the `root/app/layout.tsx` file.
+<Note>
+  Re-run the `generate-client` script any time you change FastAPI endpoints. The
+  generated files are in `lib/api/client/` and should not be edited manually.
+</Note>

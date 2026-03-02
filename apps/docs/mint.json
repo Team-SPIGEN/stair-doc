@@ -1,15 +1,15 @@
 {
   "$schema": "https://mintlify.com/schema.json",
-  "name": "Next-Fast-Turbo Docs",
+  "name": "Stair-Doc",
   "favicon": "/logos/logo.svg",
   "logo": {
     "light": "/logos/logo.svg",
     "dark": "/logos/logo-light.svg"
   },
   "colors": {
-    "primary": "#7c3aed",
-    "light": "#af87ff",
-    "dark": "#1e293b",
+    "primary": "#3b82f6",
+    "light": "#93c5fd",
+    "dark": "#1e3a8a",
     "background": {
       "dark": "#030712",
       "light": "#ffffff"
@@ -20,7 +20,7 @@
   },
   "topbarCtaButton": {
     "name": "Dashboard",
-    "url": "https://next-fast-turbo-web.vercel.app/"
+    "url": "https://next-fast-turbo.vercel.app/"
   },
   "tabs": [
     {
@@ -64,33 +64,48 @@
       ]
     },
     {
-      "group": "Users",
+      "group": "Authentication",
       "pages": [
-        "api/users/get-user",
-        "api/users/get-all-users",
-        "api/users/search-users",
-        "api/users/create-user"
+        "api/auth/login",
+        "api/auth/register",
+        "api/auth/me"
       ]
     },
     {
-      "group": "Spells",
+      "group": "Robots",
       "pages": [
-        "api/spells/get-spell",
-        "api/spells/get-all-spells",
-        "api/spells/search-spells"
+        "api/robots/get-status",
+        "api/robots/get-telemetry"
+      ]
+    },
+    {
+      "group": "Deliveries",
+      "pages": [
+        "api/deliveries/get-all-deliveries",
+        "api/deliveries/get-delivery",
+        "api/deliveries/create-delivery",
+        "api/deliveries/update-delivery",
+        "api/deliveries/delete-delivery"
+      ]
+    },
+    {
+      "group": "RFID",
+      "pages": [
+        "api/rfid/scan",
+        "api/rfid/get-tags",
+        "api/rfid/assign-tag"
       ]
     }
   ],
   "api": {
     "maintainOrder": true,
-    "baseUrl": "https://next-fast-turbo-api.vercel.app"
+    "baseUrl": "https://YOUR-RAILWAY-URL.railway.app"
   },
-  "openapi": "https://next-fast-turbo-api.vercel.app/openapi.json",
+  "openapi": "https://YOUR-RAILWAY-URL.railway.app/openapi.json",
   "feedback": {
     "thumbsRating": true
   },
   "footerSocials": {
-    "github": "https://github.com/cording12/next-fast-turbo",
-    "linkedin": "https://www.linkedin.com/in/jon-cording/"
+    "github": "https://github.com/cording12/next-fast-turbo"
   }
 }

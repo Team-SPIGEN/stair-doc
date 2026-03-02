@@ -1,23 +1,37 @@
 ---
-title: Deploying the monorepo
-description: Deploying your monorepo to Vercel/Mintlify
-"og:title": Deploying your monorepo to Vercel/Mintlify
+title: Deploying Stair-Doc
+description: Deploy the frontend to Vercel and the backend to Railway
+"og:title": Deploying Stair-Doc to Vercel and Railway
 ---
 
-## Introduction
+## Overview
 
-Deploying your monorepo to Vercel is relatively straightforward, but there are a handful of things to be aware of. 
-The frontend deployment is relatively straightforward, but the backend deployment can be a little more complex and need a bit more attention.
+Stair-Doc uses a split-deployment strategy:
 
-<Note>For a more detailed guide on deploying a monorepo to Vercel, see the [official documentation](https://vercel.com/docs/monorepos/turborepo).</Note>
+| App                    | Platform                          | Notes                                             |
+| ---------------------- | --------------------------------- | ------------------------------------------------- |
+| `apps/web` (Next.js)   | [Vercel](https://vercel.com/)     | Serverless edge deployment                        |
+| `apps/api` (FastAPI)   | [Railway](https://railway.app/)   | Long-running Python server with WebSocket support |
+| `apps/docs` (Mintlify) | [Mintlify](https://mintlify.com/) | Connected to GitHub repo                          |
+
+<Note>
+  Railway is used for the API instead of Vercel because the Socket.IO telemetry
+  stream requires a persistent, long-running server process with WebSocket
+  support. Vercel's serverless functions do not support long-lived connections.
+</Note>
 
 ## Prerequisites
-Before continuing, ensure you have:
-- A [Vercel](https://vercel.com/) account. It is typically easiest to sign up with your GitHub account, as we'll also be deploying directly from the GitHub repository.
-- Published your repo to GitHub. If you haven't done this yet, you can follow the instructions [here](https://docs.github.com/en/get-started/quickstart/create-a-repo).
-- Optional. If you're planning to deploy your documentation site to Mintlify, you'll need to have a [Mintlify](https://mintlify.com/) account.
 
-## Frontend Deployment
+Before deploying, ensure you have:
+
+- Your code pushed to a GitHub repository
+- A [Vercel](https://vercel.com/) account (sign up with GitHub for easiest access)
+- A [Railway](https://railway.app/) account
+- A [Supabase](https://supabase.com/) project with the required tables created (see [Local Development](../local-development))
+- Optional: A [Mintlify](https://mintlify.com/) account for the documentation site
+
+## Frontend Deployment (Vercel)
+
 <Steps>
     <Step title="Add new project in Vercel">
         Go to your [Vercel dashboard](https://vercel.com/dashboard) and click the `Add New...` button, and select `Project`.
@@ -28,23 +42,23 @@ Before continuing, ensure you have:
     </Step>
 
     <Step title="Configure Project">
-        Vercel will automatically detect that you have a monorepo, and should have correctly populated all the required fields. 
-        
+        Vercel will automatically detect that you have a monorepo, and should have correctly populated all the required fields.
+
         The project root directory should be automatically detected, but if it isn't, you can manually set it to the folder where your frontend is stored. In this project, that is `apps/web`.
 
         <Frame>
             <img src="/_images/deploy-web-configure-project.png" />
-        </Frame>        
-    </Step>    
+        </Frame>
+    </Step>
 
     <Step title="Deploy">
         Click the `Deploy` button to deploy your project.
-    </Step>    
+    </Step>
 
     <Step title="Add an Ignored Build Step">
         We don't want to continuously rebuild our frontend every time we push changes to the backend or documentation. To prevent this, we can add an ignored build step.\
         \
-        From the newly deployed frontend dashboard, navigate to `Settings`, then to `Git`. Scroll down to the `Ignored Build Step` section and set the behaviour to 
+        From the newly deployed frontend dashboard, navigate to `Settings`, then to `Git`. Scroll down to the `Ignored Build Step` section and set the behaviour to
         **Only build Turborepo app if there are changes**.
 
         <Frame>
@@ -53,56 +67,58 @@ Before continuing, ensure you have:
 
         <Note>For more information, see the [official documentation](https://vercel.com/docs/projects/overview#ignored-build-step).</Note>
     </Step>
-</Steps> 
 
-## Backend deployment
+</Steps>
+
+## Backend Deployment (Railway)
+
 <Steps>
-    <Step title="Add new project in Vercel">
-        Go to your [Vercel dashboard](https://vercel.com/dashboard) and click the `Add New...` button, and select `Project`.
+    <Step title="Create a new Railway project">
+        Go to [railway.app](https://railway.app) and click **New Project → Deploy from GitHub repo**. Select your repository.
     </Step>
 
-    <Step title="Import your monorepo">
-        Select the `Import Git Repository` option and select your repository from the list of repositories.
+    <Step title="Configure the service">
+        Railway will detect the repo. Add a new service and set the **Root Directory** to `apps/api`.
+
+        Railway will auto-detect Python and use `requirements.txt` or `pyproject.toml` to install dependencies.
     </Step>
 
-    <Step title="Configure Project">
-        Vercel will automatically detect that you have a monorepo, but for the backend we need to change the default configuration. 
-        
-        - Configure your project name
-        - Change the `Framework Preset` to `Other` (there is currently no Python option)
-        - Change the `Root Directory` to the folder where your backend is stored. In this project, that is `apps/api`
-        - Add your Environment Variables
+    <Step title="Set environment variables">
+        In the Railway service settings, add the following environment variables:
 
-        <Frame>
-            <img src="/_images/deploy-api-configure-project.png" />
-        </Frame>        
-    </Step>    
-
-    <Step title="Deploy">
-        Click the `Deploy` button to deploy your project. Once built, the API should be running at the URL provided.
-
-        <Frame>
-            <img src="/_images/deploy-api-running.png" />
-        </Frame>
-    </Step>    
-
-    <Step title="Add an Ignored Build Step">
-        We don't want to continuously rebuild our frontend every time we push changes to the backend or documentation. To prevent this, we can add an ignored build step.\
-        \
-        From the newly deployed frontend dashboard, navigate to `Settings`, then to `Git`. Scroll down to the `Ignored Build Step` section and set the behaviour to 
-        **Only build Turborepo app if there are changes**.
-
-        <Frame>
-            <img src="/_images/deploy-web-ignored-build-step.png" />
-        </Frame>
-
-        <Note>For more information, see the [official documentation](https://vercel.com/docs/projects/overview#ignored-build-step).</Note>
+        ```env
+        DB_URL=https://your-project.supabase.co
+        DB_API_KEY=your-supabase-anon-key
+        DB_EMAIL=your-email
+        DB_PASSWORD=your-password
+        JWT_SECRET_KEY=your-production-secret-min-32-chars
+        ROOT_PATH=https://your-railway-app.railway.app
+        ```
     </Step>
-</Steps> 
 
+    <Step title="Set the start command">
+        In the Railway service settings, set the start command:
 
-## Documentation deployment
-<Note>For a more detailed explanation, visit the [offical documentation](https://mintlify.com/docs/quickstart)</Note>
+        ```bash
+        python run.py
+        ```
+    </Step>
+
+    <Step title="Deploy and verify">
+        Click **Deploy**. Once running, visit `https://your-railway-app.railway.app/docs` to confirm the FastAPI Swagger UI is accessible.
+
+        Copy the Railway deployment URL and update `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_SOCKET_URL` in your Vercel frontend environment variables.
+    </Step>
+
+</Steps>
+</Steps>
+
+## Documentation Deployment (Mintlify)
+
+<Note>
+  For full details see the [official Mintlify
+  documentation](https://mintlify.com/docs/quickstart).
+</Note>
 
 Connecting to an existing repository with Mintlify is a little bit tricky, as their walkthrough currently seems to only support creating a new repository. However, it is possible to connect an existing repository by following the steps below.
 
@@ -118,7 +134,7 @@ Connecting to an existing repository with Mintlify is a little bit tricky, as th
             <img src="/_images/deploy-docs-select-repo.png" />
         </Frame>
     </Step>
-   
+
     <Step title="Install Mintlify app to GitHub">
         From the Mintlify dashboard, click **Things to Do** and then click **Enable automatic updates**.
 
@@ -128,4 +144,4 @@ Connecting to an existing repository with Mintlify is a little bit tricky, as th
 
     </Step>
 
-</Steps> 
+</Steps>
