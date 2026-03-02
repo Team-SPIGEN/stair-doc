@@ -8,6 +8,8 @@ import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { OfflineIndicator } from "@/components/ui/offline-indicator";
 import { AuthAwareLayout } from "@/components/layouts/auth-aware-layout";
 import { InstallPromptBanner } from "@/components/pwa/install-prompt";
+import { Toaster } from "sonner";
+import { KeyboardShortcutsProvider } from "@/components/layouts/keyboard-shortcuts-provider";
 
 export const fontSans = FontSans({
   subsets: ["latin"],
@@ -68,6 +70,13 @@ export default function RootLayout({
           <OfflineIndicator />
           <AuthAwareLayout>{children}</AuthAwareLayout>
           <InstallPromptBanner />
+          <KeyboardShortcutsProvider />
+          <Toaster
+            position="bottom-right"
+            richColors
+            closeButton
+            toastOptions={{ className: "font-sans text-sm" }}
+          />
           <TailwindIndicator />
         </ThemeProvider>
       </body>
