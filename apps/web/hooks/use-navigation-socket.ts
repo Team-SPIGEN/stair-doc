@@ -17,6 +17,11 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { getSocket } from "@/lib/socket/client";
 import type { NavigationMode } from "@/lib/api/navigation";
+import type { RobotStatusResponse } from "@/lib/api/robot-status";
+import type {
+  BridgeStatusPayload,
+  SystemHealthPayload,
+} from "@/hooks/use-robot-socket";
 
 // ── Socket event payload types ──────────────────────────────────────────
 
@@ -28,8 +33,9 @@ export interface LidarPoint {
 export interface LidarScanPayload {
   robot_id: string;
   points: LidarPoint[];
-  scan_id: number;
-  fov_degrees: number;
+  scan_id?: number;
+  fov_degrees?: number;
+  fov?: number;
   timestamp: string;
 }
 
@@ -48,14 +54,22 @@ export interface NavStatusPayload {
 
 export interface EmergencyActivePayload {
   robot_id: string;
-  activated_at: string;
-  message: string;
+  active?: boolean;
+  activated_at?: string;
+  message?: string;
+  timestamp?: string;
 }
 
 export interface CommandAckPayload {
   action: string;
   robot_id: string | null;
   status: "accepted" | "rejected";
+  timestamp: string;
+}
+
+export interface RobotTelemetryPayload {
+  robots: RobotStatusResponse[];
+  total: number;
   timestamp: string;
 }
 
@@ -79,12 +93,20 @@ interface UseNavigationSocketReturn {
   isConnected: boolean;
   /** Latest LIDAR scan points */
   lidarPoints: LidarPoint[];
+  /** Accumulated map points from manual exploration */
+  mapPoints: LidarPoint[];
   /** LIDAR field of view in degrees */
   lidarFov: number;
   /** Latest navigation status */
   navStatus: NavStatusPayload | null;
   /** Whether emergency stop is active */
   isEmergency: boolean;
+  /** Latest robot telemetry for hardware-link status */
+  robot: RobotStatusResponse | null;
+  /** Whether the Raspberry Pi bridge is registered with the API */
+  bridgeConnected: boolean;
+  /** Latest Raspberry Pi bridge status */
+  bridgeStatus: BridgeStatusPayload | null;
   /** Send a navigation command via Socket.IO */
   sendNavCommand: (
     action: string,
@@ -109,9 +131,12 @@ export function useNavigationSocket(
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lidarPoints, setLidarPoints] = useState<LidarPoint[]>([]);
+  const [mapPoints, setMapPoints] = useState<LidarPoint[]>([]);
   const [lidarFov, setLidarFov] = useState(270);
   const [navStatus, setNavStatus] = useState<NavStatusPayload | null>(null);
   const [isEmergency, setIsEmergency] = useState(false);
+  const [robot, setRobot] = useState<RobotStatusResponse | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatusPayload | null>(null);
 
   // Stable callback refs
   const onLidarScanRef = useRef(onLidarScan);
@@ -148,8 +173,12 @@ export function useNavigationSocket(
     // ── Navigation events ──
     const handleLidarScan = (data: LidarScanPayload) => {
       setLidarPoints(data.points);
-      setLidarFov(data.fov_degrees);
+      setLidarFov(data.fov_degrees ?? data.fov ?? 270);
       onLidarScanRef.current?.(data);
+    };
+
+    const handleLidarMap = (data: LidarScanPayload) => {
+      setMapPoints(data.points);
     };
 
     const handleNavStatus = (data: NavStatusPayload) => {
@@ -159,7 +188,7 @@ export function useNavigationSocket(
     };
 
     const handleEmergencyActive = (data: EmergencyActivePayload) => {
-      setIsEmergency(true);
+      setIsEmergency(data.active ?? true);
       onEmergencyActiveRef.current?.(data);
     };
 
@@ -167,13 +196,29 @@ export function useNavigationSocket(
       onCommandAckRef.current?.(data);
     };
 
+    const handleRobotTelemetry = (data: RobotTelemetryPayload) => {
+      setRobot(data.robots.find((item) => item.id === "robot-001") ?? data.robots[0] ?? null);
+    };
+
+    const handleSystemHealth = (data: SystemHealthPayload) => {
+      if (data.bridge) setBridgeStatus(data.bridge);
+    };
+
+    const handleBridgeStatus = (data: BridgeStatusPayload) => {
+      setBridgeStatus(data);
+    };
+
     // Subscribe
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("lidar_scan", handleLidarScan);
+    socket.on("lidar_map", handleLidarMap);
     socket.on("nav_status", handleNavStatus);
     socket.on("emergency_active", handleEmergencyActive);
     socket.on("command_ack", handleCommandAck);
+    socket.on("robot_telemetry", handleRobotTelemetry);
+    socket.on("system_health", handleSystemHealth);
+    socket.on("bridge_status", handleBridgeStatus);
 
     // Connect if not already
     if (!socket.connected) {
@@ -185,9 +230,13 @@ export function useNavigationSocket(
         socket.off("connect", handleConnect);
         socket.off("disconnect", handleDisconnect);
         socket.off("lidar_scan", handleLidarScan);
+        socket.off("lidar_map", handleLidarMap);
         socket.off("nav_status", handleNavStatus);
         socket.off("emergency_active", handleEmergencyActive);
         socket.off("command_ack", handleCommandAck);
+        socket.off("robot_telemetry", handleRobotTelemetry);
+        socket.off("system_health", handleSystemHealth);
+        socket.off("bridge_status", handleBridgeStatus);
       };
     }
 
@@ -195,9 +244,13 @@ export function useNavigationSocket(
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("lidar_scan", handleLidarScan);
+      socket.off("lidar_map", handleLidarMap);
       socket.off("nav_status", handleNavStatus);
       socket.off("emergency_active", handleEmergencyActive);
       socket.off("command_ack", handleCommandAck);
+      socket.off("robot_telemetry", handleRobotTelemetry);
+      socket.off("system_health", handleSystemHealth);
+      socket.off("bridge_status", handleBridgeStatus);
     };
   }, [autoConnect]);
 
@@ -212,6 +265,7 @@ export function useNavigationSocket(
         socket.emit("navigation_command", {
           action,
           robot_id: robotId ?? "robot-001",
+          robotId: robotId ?? "robot-001",
           ...params,
         });
       } else {
@@ -224,9 +278,13 @@ export function useNavigationSocket(
   return {
     isConnected,
     lidarPoints,
+    mapPoints,
     lidarFov,
     navStatus,
     isEmergency,
+    robot,
+    bridgeConnected: (bridgeStatus?.connected_count ?? 0) > 0,
+    bridgeStatus,
     sendNavCommand,
   };
 }

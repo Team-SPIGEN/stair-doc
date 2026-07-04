@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, status
 from src.api.api_v1.endpoints import deliveries as deliveries_api
 from src.api.api_v1.endpoints import navigation as nav_api
 from src.api.api_v1.endpoints import rfid as rfid_api
+from src.core.robot_state import get_robot
 from src.core.socket import sio
 from src.schemas.base import ApiResponse, success_response
 from src.schemas.delivery import DeliveryCreate, DeliveryLocation
@@ -91,10 +92,10 @@ _SUPPORTED_COMMANDS: list[SupportedCommand] = [
         role_required="all",
     ),
     SupportedCommand(
-        phrase="Open container / Unlock container",
+        phrase="Open container / Unlock container / Open door",
         action=VoiceAction.UNLOCK_CONTAINER,
-        description="Authorize RFID unlock of the delivery container",
-        example="Open container",
+        description="Authorize RFID unlock of the delivery container or door",
+        example="Open door",
         role_required="recipient",
     ),
     SupportedCommand(
@@ -194,7 +195,7 @@ def _parse_voice_text(text: str) -> VoiceCommandIntent:
         action = VoiceAction.NAVIGATE
         confidence = 0.92 if target_floor else 0.65
 
-    elif "unlock" in normalized or "open container" in normalized or "open the container" in normalized:
+    elif "unlock" in normalized or "open container" in normalized or "open the container" in normalized or "unlock door" in normalized or "open door" in normalized or "open the door" in normalized:
         action = VoiceAction.UNLOCK_CONTAINER
         confidence = 0.88
         tag_match = re.search(r"rfid[-\s]?([a-z0-9]+)", normalized)
@@ -392,7 +393,19 @@ async def process_voice_command(body: VoiceCommandRequest) -> dict:
             executed = True
 
         elif intent.action == VoiceAction.STATUS:
-            message = "Status acknowledged"
+            robot = get_robot()
+            battery = robot.get("battery_level", 0)
+            floor = robot.get("floor", "?")
+            room = robot.get("room") or "the current route"
+            mode = robot.get("status")
+            mode_text = getattr(mode, "value", mode)
+            lock = robot.get("lock_status")
+            lock_text = getattr(lock, "value", lock)
+            message = (
+                f"{robot.get('name', body.robot_id)} is on floor {floor}, near {room}. "
+                f"Battery is {battery} percent, mode is {mode_text}, "
+                f"and the container is {lock_text}."
+            )
             executed = True
 
     except HTTPException:

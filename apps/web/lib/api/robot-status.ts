@@ -31,6 +31,9 @@ export interface SensorsResponse {
   distance_to_obstacle: number | null;
   incline_angle: number;
   weight_kg: number;
+  esp32_connected: boolean;
+  esp32_port: string | null;
+  esp32_connection: string | null;
 }
 
 export type RobotStatusType =

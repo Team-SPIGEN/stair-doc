@@ -130,6 +130,9 @@ export function SystemHealth({ health, isConnected, className }: SystemHealthPro
     );
   }
 
+  const bridgeConnected =
+    health.bridge_connected ?? (health.bridge?.connected_count ?? 0) > 0;
+
   return (
     <Card className={cn("", className)}>
       <CardHeader className="pb-3">
@@ -160,7 +163,7 @@ export function SystemHealth({ health, isConnected, className }: SystemHealthPro
           <ServiceRow label="LIDAR" status={health.lidar_status} icon={Radio} />
           <ServiceRow label="Camera" status={health.camera_status} icon={Camera} />
           <ServiceRow label="Database" status={health.database_connected} icon={Database} />
-          <ServiceRow label="MQTT" status={health.mqtt_connected} icon={Wifi} />
+          <ServiceRow label="Pi Bridge" status={bridgeConnected} icon={Wifi} />
         </div>
 
         {/* Separator */}

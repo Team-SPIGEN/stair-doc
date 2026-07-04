@@ -32,10 +32,8 @@ export function DashboardLoading({ className }: DashboardLoadingProps) {
       {/* Main content skeleton */}
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Robot cards */}
-        <div className="lg:col-span-2 grid gap-4 md:grid-cols-2">
-          {[...Array(4)].map((_, i) => (
-            <RobotCardSkeleton key={i} />
-          ))}
+        <div className="lg:col-span-2 grid gap-4 md:grid-cols-1 max-w-md">
+          <RobotCardSkeleton />
         </div>
 
         {/* Activity feed skeleton */}

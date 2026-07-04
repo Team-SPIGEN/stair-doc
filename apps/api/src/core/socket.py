@@ -1,30 +1,47 @@
 """Socket.IO server for real-time robot telemetry.
 
-Emits `robot_telemetry` events every 2 seconds with live-ish mock data.
-Supports per-robot subscriptions and emergency stop commands.
+Emits `robot_telemetry` events every 2 seconds. When a Raspberry Pi bridge is
+connected for a robot, uses live hardware telemetry instead of simulation.
+Forwards navigation/robot commands to the bridge for ESP32 Bluetooth control.
 """
 
 import asyncio
-import math
-import random
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import socketio
 
-from src.schemas.robot import (
-    BatteryResponse,
-    LocationResponse,
-    LockStatus,
-    RobotStatus,
-    SensorsResponse,
+from src.config import settings
+from src.core.bridge import (
+    apply_bridge_telemetry,
+    build_bridge_command_payload,
+    get_bridge_lidar,
+    get_bridge_map,
+    get_bridge_last_seen,
+    get_bridge_sid,
+    get_bridge_status,
+    get_field,
+    is_bridge_connected,
+    register_bridge,
+    clear_bridge_map,
+    store_bridge_lidar,
+    unregister_bridge,
 )
+from src.core.robot import ROBOT_ID
+from src.core.robot_state import get_robot, get_robots
+from src.schemas.robot import LockStatus, RobotStatus
 
 # ── Socket.IO Server ─────────────────────────────────────────────────────
 
+_socket_cors_origins = (
+    "*"
+    if "*" in settings.socket_cors_origins
+    else settings.socket_cors_origins
+)
+
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",
+    cors_allowed_origins=_socket_cors_origins,
     logger=False,
     engineio_logger=False,
 )
@@ -34,96 +51,20 @@ socket_app = socketio.ASGIApp(sio, socketio_path="/socket.io")
 
 # ── Shared State ─────────────────────────────────────────────────────────
 
-# Mutable robot state that evolves over time
-_robot_state: list[dict[str, Any]] = [
-    {
-        "id": "robot-001",
-        "name": "StairBot Alpha",
-        "serial_number": "SB-001-2024",
-        "status": RobotStatus.DELIVERING,
-        "lock_status": LockStatus.LOCKED,
-        "floor": 3, "building": "Building A", "room": "305",
-        "x": 65.0, "y": 40.0,
-        "battery_level": 78, "is_charging": False,
-        "voltage": 25.6, "temperature": 32.0,
-        "estimated_minutes": 156,
-        "speed": 1.2,
-        "stairs_climbed": 156, "total_deliveries": 342,
-        "current_delivery_id": "del-123",
-        "uptime_seconds": 28800,
-        "obstacle_detected": False, "stair_detected": False,
-        "distance_to_obstacle": 3.2, "incline_angle": 0.0, "weight_kg": 2.5,
-    },
-    {
-        "id": "robot-002",
-        "name": "StairBot Beta",
-        "serial_number": "SB-002-2024",
-        "status": RobotStatus.CLIMBING,
-        "lock_status": LockStatus.LOCKED,
-        "floor": 2, "building": "Building B", "room": None,
-        "x": 30.0, "y": 70.0,
-        "battery_level": 45, "is_charging": False,
-        "voltage": 23.8, "temperature": 38.0,
-        "estimated_minutes": 72,
-        "speed": 0.8,
-        "stairs_climbed": 89, "total_deliveries": 287,
-        "current_delivery_id": "del-124",
-        "uptime_seconds": 21600,
-        "obstacle_detected": False, "stair_detected": True,
-        "distance_to_obstacle": None, "incline_angle": 35.0, "weight_kg": 1.8,
-    },
-    {
-        "id": "robot-003",
-        "name": "StairBot Gamma",
-        "serial_number": "SB-003-2024",
-        "status": RobotStatus.CHARGING,
-        "lock_status": LockStatus.LOCKED,
-        "floor": 1, "building": "Building A", "room": "Dock-1",
-        "x": 10.0, "y": 90.0,
-        "battery_level": 23, "is_charging": True,
-        "voltage": 26.2, "temperature": 28.0,
-        "estimated_minutes": 45,
-        "speed": 0.0,
-        "stairs_climbed": 201, "total_deliveries": 456,
-        "current_delivery_id": None,
-        "uptime_seconds": 14400,
-        "obstacle_detected": False, "stair_detected": False,
-        "distance_to_obstacle": None, "incline_angle": 0.0, "weight_kg": 0.0,
-    },
-    {
-        "id": "robot-004",
-        "name": "StairBot Delta",
-        "serial_number": "SB-004-2024",
-        "status": RobotStatus.IDLE,
-        "lock_status": LockStatus.UNLOCKED,
-        "floor": 1, "building": "Building C", "room": "Lobby",
-        "x": 50.0, "y": 20.0,
-        "battery_level": 92, "is_charging": False,
-        "voltage": 25.9, "temperature": 26.0,
-        "estimated_minutes": 210,
-        "speed": 0.0,
-        "stairs_climbed": 178, "total_deliveries": 389,
-        "current_delivery_id": None,
-        "uptime_seconds": 36000,
-        "obstacle_detected": False, "stair_detected": False,
-        "distance_to_obstacle": 5.0, "incline_angle": 0.0, "weight_kg": 0.0,
-    },
-]
-
-# System health metrics
+# System health metrics (connection stats only — no simulated load)
 _system_health: dict[str, Any] = {
-    "cpu_usage": 42.0,
-    "memory_usage": 58.0,
-    "disk_usage": 35.0,
-    "network_latency_ms": 12,
-    "lidar_status": "operational",
-    "camera_status": "operational",
-    "mqtt_connected": True,
-    "database_connected": True,
-    "uptime_seconds": 86400,
+    "cpu_usage": 0.0,
+    "memory_usage": 0.0,
+    "disk_usage": 0.0,
+    "network_latency_ms": 0,
+    "lidar_status": "offline",
+    "camera_status": "offline",
+    "mqtt_connected": False,
+    "database_connected": False,
+    "uptime_seconds": 0,
     "active_connections": 0,
     "errors_last_hour": 0,
-    "warnings_last_hour": 3,
+    "warnings_last_hour": 0,
 }
 
 # Background task reference
@@ -132,107 +73,40 @@ _telemetry_task: asyncio.Task | None = None
 # ── Navigation State ─────────────────────────────────────────────────────
 
 _nav_state: dict[str, dict[str, Any]] = {
-    "robot-001": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
-    "robot-002": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
-    "robot-003": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
-    "robot-004": {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+    ROBOT_ID: {
+        "mode": "idle",
+        "target_floor": None,
+        "target_location": None,
+        "progress": 0.0,
+        "eta_seconds": None,
+        "current_speed": 0.0,
+        "emergency": False,
+        "heading": 0.0,
+    },
 }
-
-
-def _generate_lidar_scan() -> list[dict[str, float]]:
-    """Generate 360 simulated LIDAR scan points (270° FOV)."""
-    points: list[dict[str, float]] = []
-    for angle in range(0, 270):
-        # Base distance with some structure (walls, obstacles)
-        base = 3.0 + 1.5 * math.sin(math.radians(angle * 3))
-        # Occasional close obstacle
-        if random.random() > 0.95:
-            dist = round(random.uniform(0.2, 1.5), 2)
-        else:
-            dist = round(max(0.1, base + random.uniform(-0.3, 0.3)), 2)
-        points.append({"angle": float(angle), "distance": dist})
-    return points
 
 
 def _build_nav_status_payload(robot_id: str) -> dict[str, Any]:
     """Build navigation status event payload."""
-    state = _nav_state.get(robot_id, {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False})
-    # Evolve autonomous progress
-    if state["mode"] == "autonomous":
-        state["progress"] = min(1.0, state["progress"] + random.uniform(0.005, 0.02))
-        if state["progress"] >= 1.0:
-            state["mode"] = "idle"
-            state["progress"] = 1.0
+    state = _nav_state.get(
+        robot_id,
+        {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
+    )
     return {
         "robot_id": robot_id,
         "mode": state["mode"],
         "target_floor": state["target_floor"],
+        "target_location": state.get("target_location"),
         "progress": round(state["progress"], 3),
+        "eta_seconds": state.get("eta_seconds"),
+        "current_speed": state.get("current_speed", 0.0),
         "emergency_active": state["emergency"],
+        "heading": state.get("heading", 0.0),
         "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 # ── Telemetry Generator ─────────────────────────────────────────────────
-
-def _evolve_robot(robot: dict[str, Any]) -> None:
-    """Mutate a robot's state to simulate real-time changes."""
-    # Battery drift
-    if robot["is_charging"]:
-        robot["battery_level"] = min(100, robot["battery_level"] + random.randint(0, 2))
-        if robot["battery_level"] >= 95:
-            robot["is_charging"] = False
-            robot["status"] = RobotStatus.IDLE
-    else:
-        robot["battery_level"] = max(0, robot["battery_level"] + random.randint(-2, 1))
-
-    # Voltage and temp jitter
-    robot["voltage"] += random.uniform(-0.3, 0.3)
-    robot["voltage"] = round(max(20.0, min(28.0, robot["voltage"])), 1)
-    robot["temperature"] += random.uniform(-0.5, 0.5)
-    robot["temperature"] = round(max(20.0, min(45.0, robot["temperature"])), 1)
-
-    # Position drift for moving robots
-    if robot["status"] in (RobotStatus.DELIVERING, RobotStatus.CLIMBING,
-                            RobotStatus.DESCENDING, RobotStatus.RETURNING):
-        robot["x"] = round(max(0, min(100, robot["x"] + random.uniform(-3, 3))), 1)
-        robot["y"] = round(max(0, min(100, robot["y"] + random.uniform(-3, 3))), 1)
-        robot["speed"] = round(max(0, random.uniform(0.3, 2.0)), 1)
-    else:
-        robot["speed"] = 0.0
-
-    # Sensor jitter
-    robot["obstacle_detected"] = random.random() > 0.92
-    if robot["status"] == RobotStatus.CLIMBING:
-        robot["stair_detected"] = True
-        robot["incline_angle"] = round(random.uniform(25, 40), 1)
-    else:
-        robot["stair_detected"] = random.random() > 0.85
-        robot["incline_angle"] = round(random.uniform(-2, 5), 1)
-
-    if robot["obstacle_detected"]:
-        robot["distance_to_obstacle"] = round(random.uniform(0.3, 2.0), 1)
-    else:
-        robot["distance_to_obstacle"] = round(random.uniform(2.0, 6.0), 1) if random.random() > 0.3 else None
-
-    # Uptime
-    robot["uptime_seconds"] += 2
-
-    # Occasional delivery completion
-    if robot["status"] == RobotStatus.DELIVERING and random.random() > 0.95:
-        robot["total_deliveries"] += 1
-        robot["stairs_climbed"] += random.randint(1, 4)
-
-
-def _evolve_system_health() -> None:
-    """Mutate system health metrics."""
-    _system_health["cpu_usage"] = round(max(5, min(95, _system_health["cpu_usage"] + random.uniform(-5, 5))), 1)
-    _system_health["memory_usage"] = round(max(20, min(90, _system_health["memory_usage"] + random.uniform(-2, 2))), 1)
-    _system_health["network_latency_ms"] = max(1, _system_health["network_latency_ms"] + random.randint(-3, 3))
-    _system_health["uptime_seconds"] += 2
-    _system_health["errors_last_hour"] = max(0, _system_health["errors_last_hour"] + (1 if random.random() > 0.97 else 0))
-    _system_health["warnings_last_hour"] = max(0, _system_health["warnings_last_hour"] + random.choice([-1, 0, 0, 0, 1]))
-
 
 def _build_telemetry_payload(robot: dict[str, Any]) -> dict[str, Any]:
     """Build a robot_telemetry event payload (JSON-safe dict)."""
@@ -262,6 +136,9 @@ def _build_telemetry_payload(robot: dict[str, Any]) -> dict[str, Any]:
             "distance_to_obstacle": robot["distance_to_obstacle"],
             "incline_angle": robot["incline_angle"],
             "weight_kg": robot["weight_kg"],
+            "esp32_connected": robot.get("esp32_connected", False),
+            "esp32_port": robot.get("esp32_port"),
+            "esp32_connection": robot.get("esp32_connection"),
         },
         "speed": robot["speed"],
         "stairs_climbed": robot["stairs_climbed"],
@@ -274,9 +151,14 @@ def _build_telemetry_payload(robot: dict[str, Any]) -> dict[str, Any]:
 
 def _build_system_health_payload() -> dict[str, Any]:
     """Build system_health event payload."""
+    bridge_live = is_bridge_connected(ROBOT_ID)
     return {
         **_system_health,
         "active_connections": len(_connected_sids),
+        "bridge_connected": bridge_live,
+        "lidar_status": "operational" if bridge_live else "offline",
+        "camera_status": "operational" if bridge_live else "offline",
+        "mqtt_connected": False,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -286,21 +168,78 @@ def _build_system_health_payload() -> dict[str, Any]:
 _connected_sids: set[str] = set()
 
 
+async def _forward_to_bridge(
+    robot_id: str | None,
+    action: str,
+    *,
+    speed: float = 0.5,
+    target_floor: int | None = None,
+) -> list[str]:
+    """Forward a command to the connected Pi bridge. Returns robot IDs sent."""
+    sent: list[str] = []
+    rid = robot_id or ROBOT_ID
+    sid = get_bridge_sid(rid)
+    if sid:
+        payload = build_bridge_command_payload(
+            action, rid, speed=speed, target_floor=target_floor
+        )
+        await sio.emit("bridge_command", payload, to=sid)
+        sent.append(rid)
+    return sent
+
+
+def _motor_controller_ready(robot_id: str) -> bool:
+    """Return False when a live bridge has no ESP32 motor serial link."""
+    if not get_bridge_sid(robot_id):
+        return True
+    robot = get_robot()
+    if robot_id != robot["id"]:
+        return False
+    return bool(robot.get("esp32_connected", False))
+
+
+async def _reject_navigation_command(
+    sid: str,
+    action: str,
+    robot_id: str,
+    message: str,
+) -> None:
+    await sio.emit(
+        "command_ack",
+        {
+            "action": f"nav_{action}",
+            "robot_id": robot_id,
+            "status": "rejected",
+            "message": message,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+        to=sid,
+    )
+
+
 async def _telemetry_loop() -> None:
     """Emit robot_telemetry + system_health every 2 seconds."""
     while True:
         await asyncio.sleep(2)
 
-        # Evolve state
-        for robot in _robot_state:
-            _evolve_robot(robot)
-        _evolve_system_health()
+        robot = get_robot()
+        if is_bridge_connected(robot["id"]):
+            robot["uptime_seconds"] = robot.get("uptime_seconds", 0) + 2
+            _system_health["uptime_seconds"] += 2
 
-        # Build payloads
-        robots_payload = [_build_telemetry_payload(r) for r in _robot_state]
+        # Mark bridged robot offline if telemetry is stale
+        now = datetime.now(UTC)
+        if is_bridge_connected(robot["id"]):
+            last = get_bridge_last_seen(robot["id"])
+            if last and (now - last).total_seconds() > settings.BRIDGE_STALE_SECONDS:
+                robot["status"] = RobotStatus.OFFLINE
+                robot["speed"] = 0.0
+                robot["esp32_connected"] = False
+
+        robots_payload = [_build_telemetry_payload(r) for r in get_robots()]
         health_payload = _build_system_health_payload()
+        health_payload["bridge"] = get_bridge_status()
 
-        # Emit to all connected clients
         if _connected_sids:
             await sio.emit("robot_telemetry", {
                 "robots": robots_payload,
@@ -309,15 +248,26 @@ async def _telemetry_loop() -> None:
             })
             await sio.emit("system_health", health_payload)
 
-            # Navigation data: LIDAR scan + nav status for each robot
-            lidar_data = _generate_lidar_scan()
-            await sio.emit("lidar_scan", {
-                "robot_id": "robot-001",
-                "points": lidar_data,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            for rid in _nav_state:
-                await sio.emit("nav_status", _build_nav_status_payload(rid))
+            bridge_lidar = get_bridge_lidar(ROBOT_ID)
+            if bridge_lidar:
+                await sio.emit("lidar_scan", {
+                    "robot_id": ROBOT_ID,
+                    "points": bridge_lidar,
+                    "fov": 270,
+                    "source": "bridge",
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                bridge_map = get_bridge_map(ROBOT_ID)
+                if bridge_map:
+                    await sio.emit("lidar_map", {
+                        "robot_id": ROBOT_ID,
+                        "points": bridge_map,
+                        "fov": 360,
+                        "source": "bridge",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+
+            await sio.emit("nav_status", _build_nav_status_payload(ROBOT_ID))
 
 
 # ── Socket.IO Event Handlers ────────────────────────────────────────────
@@ -330,13 +280,15 @@ async def connect(sid: str, environ: dict) -> None:
     print(f"[Socket.IO] Client connected: {sid}  ({len(_connected_sids)} total)")
 
     # Send initial state immediately
-    robots_payload = [_build_telemetry_payload(r) for r in _robot_state]
+    robots_payload = [_build_telemetry_payload(r) for r in get_robots()]
     await sio.emit("robot_telemetry", {
         "robots": robots_payload,
         "total": len(robots_payload),
         "timestamp": datetime.utcnow().isoformat(),
     }, to=sid)
-    await sio.emit("system_health", _build_system_health_payload(), to=sid)
+    health_payload = _build_system_health_payload()
+    health_payload["bridge"] = get_bridge_status()
+    await sio.emit("system_health", health_payload, to=sid)
 
 
 @sio.event
@@ -344,13 +296,24 @@ async def disconnect(sid: str) -> None:
     """Client disconnected."""
     _connected_sids.discard(sid)
     _system_health["active_connections"] = len(_connected_sids)
+
+    robot_id = unregister_bridge(sid)
+    if robot_id:
+        for robot in get_robots():
+            if robot["id"] == robot_id:
+                robot["status"] = RobotStatus.OFFLINE
+                robot["speed"] = 0.0
+                robot["esp32_connected"] = False
+        await sio.emit("bridge_status", get_bridge_status())
+        print(f"[Socket.IO] Bridge disconnected: {robot_id}")
+
     print(f"[Socket.IO] Client disconnected: {sid}  ({len(_connected_sids)} total)")
 
 
 @sio.event
 async def subscribe_robot(sid: str, data: dict) -> None:
     """Subscribe to a specific robot's updates (room-based)."""
-    robot_id = data.get("robotId")
+    robot_id = get_field(data, "robot_id", "robotId")
     if robot_id:
         await sio.enter_room(sid, f"robot:{robot_id}")
         print(f"[Socket.IO] {sid} subscribed to {robot_id}")
@@ -359,52 +322,156 @@ async def subscribe_robot(sid: str, data: dict) -> None:
 @sio.event
 async def unsubscribe_robot(sid: str, data: dict) -> None:
     """Unsubscribe from a specific robot's updates."""
-    robot_id = data.get("robotId")
+    robot_id = get_field(data, "robot_id", "robotId")
     if robot_id:
         await sio.leave_room(sid, f"robot:{robot_id}")
         print(f"[Socket.IO] {sid} unsubscribed from {robot_id}")
 
 
 @sio.event
+async def bridge_register(sid: str, data: dict) -> None:
+    """Register a Raspberry Pi bridge client for a robot."""
+    robot_id = get_field(data, "robot_id", "robotId", default="robot-001")
+    token = get_field(data, "token")
+    ok, message = register_bridge(sid, robot_id, token)
+
+    await sio.emit("bridge_register_ack", {
+        "ok": ok,
+        "robot_id": robot_id,
+        "message": message,
+        "timestamp": datetime.utcnow().isoformat(),
+    }, to=sid)
+
+    if ok:
+        for robot in get_robots():
+            if robot["id"] == robot_id:
+                robot["status"] = RobotStatus.IDLE
+        await sio.emit("bridge_status", get_bridge_status())
+        print(f"[Socket.IO] Bridge registered: {robot_id} ({sid})")
+    else:
+        print(f"[Socket.IO] Bridge registration failed: {message}")
+
+
+@sio.event
+async def bridge_telemetry(sid: str, data: dict) -> None:
+    """Ingest live telemetry from the Pi bridge."""
+    robot_id = get_field(data, "robot_id", "robotId")
+    if not robot_id or get_bridge_sid(robot_id) != sid:
+        return
+
+    for robot in get_robots():
+        if robot["id"] == robot_id:
+            apply_bridge_telemetry(robot, data)
+            break
+
+    # Optional inline lidar from ultrasonic readings
+    sensors = get_field(data, "sensors", default={})
+    if isinstance(sensors, dict):
+        front = sensors.get("front_distance_cm") or sensors.get("frontDistanceCm")
+        rear = sensors.get("rear_distance_cm") or sensors.get("rearDistanceCm")
+        if front is not None and rear is not None:
+            from src.core.bridge import ultrasonic_to_lidar
+
+            fl = sensors.get("stair_front_left_cm") or sensors.get("stairFrontLeftCm")
+            rr = sensors.get("stair_rear_right_cm") or sensors.get("stairRearRightCm")
+            store_bridge_lidar(
+                robot_id,
+                ultrasonic_to_lidar(
+                    float(front),
+                    float(rear),
+                    float(fl) if fl is not None else None,
+                    float(rr) if rr is not None else None,
+                ),
+            )
+
+
+@sio.event
+async def bridge_lidar(sid: str, data: dict) -> None:
+    """Ingest LIDAR / ultrasonic scan points from the Pi bridge."""
+    robot_id = get_field(data, "robot_id", "robotId")
+    points = data.get("points", [])
+    if robot_id and get_bridge_sid(robot_id) == sid and points:
+        store_bridge_lidar(robot_id, points)
+
+
+@sio.event
 async def robot_command(sid: str, data: dict) -> None:
     """Handle commands from the frontend (e.g., emergency stop)."""
     action = data.get("action")
-    robot_id = data.get("robotId")
+    robot_id = get_field(data, "robot_id", "robotId")
     print(f"[Socket.IO] Command from {sid}: {action} → {robot_id or 'all'}")
 
     if action == "emergency_stop":
-        targets = (
-            [r for r in _robot_state if r["id"] == robot_id]
-            if robot_id
-            else _robot_state
+        state = _nav_state.setdefault(
+            robot_id or ROBOT_ID,
+            {
+                "mode": "idle",
+                "target_floor": None,
+                "target_location": None,
+                "progress": 0.0,
+                "eta_seconds": None,
+                "current_speed": 0.0,
+                "emergency": False,
+                "heading": 0.0,
+            },
         )
-        for robot in targets:
+        state["mode"] = "emergency"
+        state["target_floor"] = None
+        state["target_location"] = None
+        state["progress"] = 0.0
+        state["eta_seconds"] = None
+        state["current_speed"] = 0.0
+        state["emergency"] = True
+
+        robot = get_robot()
+        if not robot_id or robot_id == robot["id"]:
             robot["status"] = RobotStatus.EMERGENCY
             robot["speed"] = 0.0
 
-        # Broadcast emergency event
+        await sio.emit("emergency_active", {"robot_id": robot_id or ROBOT_ID, "active": True, "timestamp": datetime.utcnow().isoformat()})
+        await sio.emit("nav_status", _build_nav_status_payload(robot_id or ROBOT_ID))
         await sio.emit("delivery_update", {
             "type": "emergency_stop",
-            "robot_id": robot_id,
+            "robot_id": robot_id or ROBOT_ID,
             "timestamp": datetime.utcnow().isoformat(),
-            "message": f"Emergency stop: {robot_id or 'all robots'}",
+            "message": f"Emergency stop: {robot_id or ROBOT_ID}",
         })
+        await _forward_to_bridge(robot_id, "emergency_stop")
 
     elif action == "resume":
-        targets = (
-            [r for r in _robot_state if r["id"] == robot_id]
-            if robot_id
-            else _robot_state
+        state = _nav_state.setdefault(
+            robot_id or ROBOT_ID,
+            {
+                "mode": "idle",
+                "target_floor": None,
+                "target_location": None,
+                "progress": 0.0,
+                "eta_seconds": None,
+                "current_speed": 0.0,
+                "emergency": False,
+                "heading": 0.0,
+            },
         )
-        for robot in targets:
-            if robot["status"] == RobotStatus.EMERGENCY:
-                robot["status"] = RobotStatus.IDLE
+        state["mode"] = "idle"
+        state["target_floor"] = None
+        state["target_location"] = None
+        state["progress"] = 0.0
+        state["eta_seconds"] = None
+        state["current_speed"] = 0.0
+        state["emergency"] = False
 
+        robot = get_robot()
+        if (not robot_id or robot_id == robot["id"]) and robot["status"] == RobotStatus.EMERGENCY:
+            robot["status"] = RobotStatus.IDLE
+
+        await _forward_to_bridge(robot_id, "stop")
+        await sio.emit("emergency_active", {"robot_id": robot_id or ROBOT_ID, "active": False, "timestamp": datetime.utcnow().isoformat()})
+        await sio.emit("nav_status", _build_nav_status_payload(robot_id or ROBOT_ID))
         await sio.emit("delivery_update", {
             "type": "resume",
-            "robot_id": robot_id,
+            "robot_id": robot_id or ROBOT_ID,
             "timestamp": datetime.utcnow().isoformat(),
-            "message": f"Resumed: {robot_id or 'all robots'}",
+            "message": f"Resumed: {robot_id or ROBOT_ID}",
         })
 
     # Acknowledge command
@@ -422,55 +489,124 @@ async def navigation_command(sid: str, data: dict) -> None:
 
     Supports manual joystick commands and autonomous mode toggle.
     Broadcasts nav_status updates to all connected clients.
+    Forwards movement commands to the Pi bridge for ESP32 control.
     """
     action = data.get("action", "")
-    robot_id = data.get("robotId", "robot-001")
+    robot_id = get_field(data, "robot_id", "robotId", default="robot-001")
     now = datetime.utcnow().isoformat()
 
     state = _nav_state.get(robot_id)
     if state is None:
-        _nav_state[robot_id] = {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False}
+        _nav_state[robot_id] = {
+            "mode": "idle",
+            "target_floor": None,
+            "target_location": None,
+            "progress": 0.0,
+            "eta_seconds": None,
+            "current_speed": 0.0,
+            "emergency": False,
+            "heading": 0.0,
+        }
         state = _nav_state[robot_id]
 
     if action == "emergency_stop":
         state["mode"] = "emergency"
+        state["target_floor"] = None
+        state["target_location"] = None
         state["emergency"] = True
         state["progress"] = 0.0
-        # Also stop the robot in telemetry state
-        for robot in _robot_state:
+        state["eta_seconds"] = None
+        state["current_speed"] = 0.0
+        for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["status"] = RobotStatus.EMERGENCY
                 robot["speed"] = 0.0
         await sio.emit("emergency_active", {"robot_id": robot_id, "active": True, "timestamp": now})
+        await _forward_to_bridge(robot_id, "emergency_stop")
 
     elif action == "reset_estop":
         state["mode"] = "idle"
+        state["target_floor"] = None
+        state["target_location"] = None
+        state["progress"] = 0.0
+        state["eta_seconds"] = None
+        state["current_speed"] = 0.0
         state["emergency"] = False
-        for robot in _robot_state:
+        for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["status"] = RobotStatus.IDLE
+                robot["speed"] = 0.0
         await sio.emit("emergency_active", {"robot_id": robot_id, "active": False, "timestamp": now})
+        await _forward_to_bridge(robot_id, "stop")
 
     elif action == "autonomous":
-        target_floor = data.get("targetFloor", 1)
+        if not _motor_controller_ready(robot_id):
+            await _reject_navigation_command(
+                sid,
+                action,
+                robot_id,
+                "ESP32 motor controller is not connected.",
+            )
+            return
+        target_floor = get_field(data, "target_floor", "targetFloor", default=1)
         state["mode"] = "autonomous"
         state["target_floor"] = target_floor
+        state["target_location"] = get_field(data, "target_location", "targetLocation")
         state["progress"] = 0.0
+        state["eta_seconds"] = get_field(data, "eta_seconds", "etaSeconds")
+        state["current_speed"] = float(data.get("speed", 0.7))
         state["emergency"] = False
+        await _forward_to_bridge(robot_id, "autonomous", target_floor=int(target_floor))
 
     elif action in ("forward", "backward", "left", "right"):
+        if not _motor_controller_ready(robot_id):
+            await _reject_navigation_command(
+                sid,
+                action,
+                robot_id,
+                "ESP32 motor controller is not connected.",
+            )
+            return
         state["mode"] = "manual"
         state["emergency"] = False
         speed = data.get("speed", 0.5)
-        for robot in _robot_state:
+        state["current_speed"] = float(speed)
+        for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["speed"] = speed
+        await _forward_to_bridge(robot_id, action, speed=float(speed))
 
     elif action == "stop":
         state["mode"] = "idle"
-        for robot in _robot_state:
+        state["current_speed"] = 0.0
+        state["target_floor"] = None
+        state["target_location"] = None
+        state["eta_seconds"] = None
+        for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["speed"] = 0.0
+        await _forward_to_bridge(robot_id, "stop")
+
+    elif action in ("front_servo_up", "front_servo_down", "rear_servo_up", "rear_servo_down"):
+        if not _motor_controller_ready(robot_id):
+            await _reject_navigation_command(
+                sid,
+                action,
+                robot_id,
+                "ESP32 motor controller is not connected.",
+            )
+            return
+        await _forward_to_bridge(robot_id, action)
+
+    elif action == "reset_map":
+        clear_bridge_map(robot_id)
+        await sio.emit("lidar_map", {
+            "robot_id": robot_id,
+            "points": [],
+            "fov": 360,
+            "source": "bridge",
+            "timestamp": now,
+        })
 
     # Broadcast updated nav status
     await sio.emit("nav_status", _build_nav_status_payload(robot_id))
@@ -490,55 +626,41 @@ async def navigation_command(sid: str, data: dict) -> None:
 async def rfid_scan(sid: str, data: dict) -> None:
     """Handle real-time RFID scan from the frontend.
 
-    Checks a simple set of known tags and emits `rfid_result` back.
-    Also broadcasts `rfid_event` to all connected clients for live feeds.
+    Uses the same authorization path as REST so registered tags, names, and
+    access logs stay consistent.
     """
-    tag_id = data.get("tagId", "")
-    robot_id = data.get("robotId", "")
-    delivery_id = data.get("deliveryId")
-    now = datetime.utcnow().isoformat()
+    from src.api.api_v1.endpoints.rfid import authorize_scan
+    from src.schemas.rfid import RFIDAuthorizeRequest
 
-    # Simple lookup against known active tags
-    _known_tags = {
-        "RFID-A1B2C3": "Alice Johnson",
-        "RFID-D4E5F6": "Bob Smith",
-        "RFID-G7H8I9": "Carol Williams",
-    }
+    tag_id = get_field(data, "tag_id", "tagId", default="")
+    robot_id = get_field(data, "robot_id", "robotId", default=ROBOT_ID)
+    delivery_id = get_field(data, "delivery_id", "deliveryId")
 
-    user_name = _known_tags.get(tag_id)
-    authorized = user_name is not None
-
-    result = {
-        "authorized": authorized,
-        "tag_id": tag_id,
-        "robot_id": robot_id,
-        "delivery_id": delivery_id,
-        "container_status": "unlocked" if authorized else "locked",
-        "user_name": user_name,
-        "message": (
-            f"Welcome, {user_name}! Container unlocked."
-            if authorized
-            else "Access denied — unknown or revoked tag."
-        ),
-        "timestamp": now,
-    }
+    result_model = await authorize_scan(
+        RFIDAuthorizeRequest(
+            tag_id=tag_id,
+            robot_id=robot_id,
+            delivery_id=delivery_id,
+        )
+    )
+    result = result_model.model_dump(mode="json")
 
     # Send result back to the requesting client
     await sio.emit("rfid_result", result, to=sid)
 
     # Broadcast scan event to all connected clients (live activity feed)
     await sio.emit("rfid_event", {
-        "tag_id": tag_id,
-        "robot_id": robot_id,
-        "delivery_id": delivery_id,
-        "authorized": authorized,
-        "user_name": user_name,
-        "scan_type": "unlock" if authorized else "denied",
+        "tag_id": result["tag_id"],
+        "robot_id": result["robot_id"],
+        "delivery_id": result["delivery_id"],
+        "authorized": result["authorized"],
+        "user_name": result["user_name"],
+        "scan_type": "unlock" if result["authorized"] else "denied",
         "message": result["message"],
-        "timestamp": now,
+        "timestamp": result["timestamp"],
     })
 
-    print(f"[Socket.IO] RFID scan: {tag_id} → {'✅ authorized' if authorized else '❌ denied'}")
+    print(f"[Socket.IO] RFID scan: {result['tag_id']} → {'authorized' if result['authorized'] else 'denied'}")
 
 
 @sio.event

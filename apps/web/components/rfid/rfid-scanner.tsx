@@ -21,6 +21,7 @@ import {
   type ContainerStatus,
 } from "@/lib/api/rfid";
 import { getSocket } from "@/lib/socket/client";
+import { ROBOT_ID } from "@/lib/robot";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -40,8 +41,8 @@ interface RFIDScannerProps {
 // ── Component ────────────────────────────────────────────────────────────
 
 export function RFIDScanner({ className, useSocket = false }: RFIDScannerProps) {
-  const [tagId, setTagId] = useState("RFID-A1B2C3");
-  const [robotId, setRobotId] = useState("robot-001");
+  const [tagId, setTagId] = useState("");
+  const robotId = ROBOT_ID;
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [result, setResult] = useState<RFIDAuthorizeResponse | null>(null);
   const [containerStatus, setContainerStatus] = useState<ContainerStatus>("locked");
@@ -186,15 +187,7 @@ export function RFIDScanner({ className, useSocket = false }: RFIDScannerProps) 
     }
   })();
 
-  // ── Quick-select RFID tags for demo ────────────────────────────────
-
-  const presetTags = [
-    { id: "RFID-A1B2C3", label: "Alice (Active)" },
-    { id: "RFID-D4E5F6", label: "Bob (Active)" },
-    { id: "RFID-G7H8I9", label: "Carol (Operator)" },
-    { id: "RFID-REVOKED", label: "Dave (Revoked)" },
-    { id: "RFID-UNKNOWN", label: "Unknown Tag" },
-  ];
+  // ── Manual Input ──────────────────────────────────────────────────────────────
 
   return (
     <div className={cn("rounded-xl border bg-card p-6", className)}>
@@ -273,30 +266,6 @@ export function RFIDScanner({ className, useSocket = false }: RFIDScannerProps) 
         )}
       </div>
 
-      {/* ── Tag Quick Select ────────────────────────────────────────── */}
-      <div className="mb-4">
-        <Label className="mb-2 block text-xs text-muted-foreground">
-          Quick Select Tag
-        </Label>
-        <div className="flex flex-wrap gap-2">
-          {presetTags.map((tag) => (
-            <button
-              key={tag.id}
-              type="button"
-              onClick={() => setTagId(tag.id)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 text-xs transition-colors",
-                tagId === tag.id
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:border-primary/50",
-              )}
-            >
-              {tag.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* ── Manual Input ────────────────────────────────────────────── */}
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <div>
@@ -313,14 +282,13 @@ export function RFIDScanner({ className, useSocket = false }: RFIDScannerProps) 
         </div>
         <div>
           <Label htmlFor="rfid-robot" className="mb-1.5 block text-xs">
-            Robot ID
+            Robot
           </Label>
           <Input
             id="rfid-robot"
             value={robotId}
-            onChange={(e) => setRobotId(e.target.value)}
-            placeholder="e.g., robot-001"
-            className="h-9 text-sm"
+            readOnly
+            className="h-9 text-sm bg-muted"
           />
         </div>
       </div>
@@ -339,7 +307,7 @@ export function RFIDScanner({ className, useSocket = false }: RFIDScannerProps) 
         ) : (
           <>
             <Send className="mr-2 h-4 w-4" />
-            Simulate RFID Scan
+            Scan RFID Tag
           </>
         )}
       </Button>

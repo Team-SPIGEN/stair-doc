@@ -7,6 +7,11 @@ const TOKEN_KEY = "stairdoc_token";
  */
 const PUBLIC_PATHS = new Set(["/auth"]);
 
+function normalizePathname(pathname: string): string {
+  if (pathname === "/") return "/";
+  return pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
 /**
  * Role → allowed path prefixes.
  *
@@ -33,7 +38,7 @@ const ROLE_ROUTES: Record<string, string[]> = {
     "/camera",
     "/navigation",
     "/settings",
-    "/admin",
+    "/analytics",
   ],
 };
 
@@ -54,8 +59,8 @@ function decodePayload(token: string): Record<string, unknown> | null {
   }
 }
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+export default function proxy(request: NextRequest) {
+  const pathname = normalizePathname(request.nextUrl.pathname);
 
   // 1. Always allow public paths
   if (PUBLIC_PATHS.has(pathname)) {

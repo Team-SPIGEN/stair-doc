@@ -4,7 +4,6 @@ import { Inter as FontSans } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme/theme-provider";
 import { OpenAPI } from "@/lib/api/client";
-import { TailwindIndicator } from "@/components/tailwind-indicator";
 import { OfflineIndicator } from "@/components/ui/offline-indicator";
 import { AuthAwareLayout } from "@/components/layouts/auth-aware-layout";
 import { InstallPromptBanner } from "@/components/pwa/install-prompt";
@@ -16,11 +15,7 @@ export const fontSans = FontSans({
   variable: "--font-sans",
 });
 
-if (process.env.NODE_ENV === "production") {
-  OpenAPI.BASE = "https://next-fast-turbo.vercel.app";
-}
-
-console.log("Using OpenAPI.base", OpenAPI.BASE);
+OpenAPI.BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -77,7 +72,6 @@ export default function RootLayout({
             closeButton
             toastOptions={{ className: "font-sans text-sm" }}
           />
-          <TailwindIndicator />
         </ThemeProvider>
       </body>
     </html>

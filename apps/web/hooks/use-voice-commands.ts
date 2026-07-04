@@ -28,6 +28,35 @@ function getSpeechImpl(): SpeechRecognitionConstructor | undefined {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition;
 }
 
+function pickNaturalVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  const englishVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("en"));
+  const candidates = englishVoices.length ? englishVoices : voices;
+  const preferredNames = [
+    "samantha",
+    "ava",
+    "allison",
+    "susan",
+    "karen",
+    "victoria",
+    "google us english",
+    "google uk english female",
+    "microsoft aria",
+    "microsoft jenny",
+    "microsoft zira",
+    "alex",
+  ];
+
+  return (
+    candidates.find((voice) => {
+      const name = voice.name.toLowerCase();
+      return preferredNames.some((preferred) => name.includes(preferred));
+    }) ??
+    candidates.find((voice) => voice.localService) ??
+    candidates[0] ??
+    null
+  );
+}
+
 export interface VoiceHistoryItem {
   id: string;
   text: string;
@@ -105,6 +134,7 @@ export function useVoiceCommands(
   const [pendingConfirmation, setPendingConfirmation] =
     useState<VoiceCommandResponse | null>(null);
   const [supportedCommands, setSupportedCommands] = useState<SupportedCommand[]>([]);
+  const [speechVoices, setSpeechVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const submittingRef = useRef(false);
@@ -119,7 +149,38 @@ export function useVoiceCommands(
       });
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+    const loadVoices = () => {
+      setSpeechVoices(window.speechSynthesis.getVoices());
+    };
+
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
+    };
+  }, []);
+
   // Helpers -----------------------------------------------------------------
+
+  const speak = useCallback((message: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message);
+    const voice = pickNaturalVoice(speechVoices);
+    if (voice) {
+      utterance.voice = voice;
+      utterance.lang = voice.lang;
+    } else {
+      utterance.lang = "en-US";
+    }
+    utterance.rate = 0.88;
+    utterance.pitch = 0.92;
+    utterance.volume = 0.85;
+    window.speechSynthesis.speak(utterance);
+  }, [speechVoices]);
 
   const addHistory = useCallback((item: VoiceHistoryItem) => {
     setHistory((prev) => [item, ...prev].slice(0, 12));
@@ -152,9 +213,11 @@ export function useVoiceCommands(
         navigator.vibrate([15, 50, 15]);
       }
 
+      speak(response.message);
+
       onCommand?.(response);
     },
-    [addHistory, onCommand],
+    [addHistory, onCommand, speak],
   );
 
   const submitText = useCallback(

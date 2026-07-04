@@ -51,6 +51,7 @@ export function InstallPageClient() {
               src="/icons/icon-192x192.png"
               alt="StairDoc icon"
               fill
+              sizes="96px"
               className="object-cover"
               priority
             />
@@ -138,7 +139,7 @@ function IOSInstructions() {
             Tap the{" "}
             <Share className="inline h-4 w-4 align-text-bottom" />
             {" "}
-            <strong>Share</strong> button in Safari's toolbar
+            <strong>Share</strong> button in Safari&apos;s toolbar
           </span>
         </li>
         <li className="flex items-start gap-3">

@@ -50,6 +50,9 @@ class SensorsResponse(BaseModel):
     distance_to_obstacle: Optional[float] = Field(None, ge=0)
     incline_angle: float = Field(0.0, ge=-90, le=90)
     weight_kg: float = Field(0.0, ge=0, le=50, description="Payload weight")
+    esp32_connected: bool = False
+    esp32_port: Optional[str] = None
+    esp32_connection: Optional[str] = None
 
 
 class RobotStatusResponse(BaseModel):

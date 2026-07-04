@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from src.api.api_v1.api import api_router
-from src.config import settings
+from src.config import settings, validate_production_settings
 from src.core.socket import sio, start_telemetry_background_task
+from src.core.storage import init_storage
 
 info_router = APIRouter()
 
@@ -14,6 +15,15 @@ info_router = APIRouter()
 @info_router.get("/", status_code=200, include_in_schema=False)
 async def info():
     return [{"Status": "API Running"}]
+
+
+@info_router.get("/health", status_code=200, include_in_schema=False)
+async def health():
+    return {
+        "ok": True,
+        "service": settings.PROJECT_NAME,
+        "environment": settings.ENVIRONMENT,
+    }
 
 
 def custom_generate_unique_id(route: APIRoute):
@@ -31,6 +41,8 @@ def custom_generate_unique_id(route: APIRoute):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan – start background tasks on startup."""
+    validate_production_settings()
+    init_storage()
     start_telemetry_background_task()
     yield
 
@@ -50,8 +62,8 @@ def get_application():
 
     _app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=settings.cors_origins,
+        allow_credentials="*" not in settings.cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

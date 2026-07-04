@@ -45,12 +45,15 @@ interface JoystickProps {
   size?: number;
   /** Whether the joystick is disabled (e.g. emergency stop active). */
   disabled?: boolean;
+  /** Short reason shown below the joystick while disabled. */
+  disabledLabel?: string;
 }
 
 export function Joystick({
   onCommand,
   size = 200,
   disabled = false,
+  disabledLabel = "Joystick disabled",
 }: JoystickProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const managerRef = useRef<JoystickManager | null>(null);
@@ -131,7 +134,7 @@ export function Joystick({
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        {disabled ? "Emergency stop active" : "Drag to move robot"}
+        {disabled ? disabledLabel : "Drag to move robot"}
       </p>
     </div>
   );

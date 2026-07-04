@@ -1,25 +1,27 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Icons } from "@/components/icons";
 import { motion } from "framer-motion";
 import { Bot } from "lucide-react";
 import NavLinks from "./NavLinks";
+import {
+  isSidebarCollapsed,
+  setSidebarCollapsed,
+  subscribeSidebarToggle,
+} from "@/lib/sidebar-toggle";
 
 const Sidebar = () => {
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window !== "undefined") {
-      const collapsedState = localStorage.getItem("sidebarCollapsed");
-      return collapsedState === "true";
-    }
-    return false;
-  });
+  const [collapsed, setCollapsed] = useState(isSidebarCollapsed);
   const animationDuration = 0.4;
   const sideBarWidth = "250px";
 
+  useEffect(() => {
+    return subscribeSidebarToggle(setCollapsed);
+  }, []);
+
   const handleClose = () => {
-    localStorage.setItem("sidebarCollapsed", (!collapsed).toString());
-    setCollapsed(!collapsed);
+    setSidebarCollapsed(!collapsed);
   };
 
   return (

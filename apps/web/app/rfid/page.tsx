@@ -19,8 +19,10 @@ import {
   Activity,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { RoleGate } from "@/components/auth/role-gate";
 import { RFIDScanner } from "@/components/rfid/rfid-scanner";
 import { RFIDTable } from "@/components/rfid/rfid-table";
+import { RfidTagRegister } from "@/components/rfid/rfid-tag-register";
 import {
   fetchRFIDTags,
   fetchRFIDLogs,
@@ -196,6 +198,12 @@ export default function RFIDPage() {
         {/* Access Logs */}
         <RFIDTable initialLogs={logs} liveLogs={liveLogs} />
       </div>
+
+      <RoleGate allowed={["admin"]}>
+        <RfidTagRegister
+          onRegistered={(tag) => setTags((prev) => [...prev, tag])}
+        />
+      </RoleGate>
 
       {/* ── Registered Tags ─────────────────────────────────────────── */}
       {tags.length > 0 && (

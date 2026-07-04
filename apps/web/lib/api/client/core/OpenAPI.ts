@@ -20,7 +20,8 @@ export type OpenAPIConfig = {
 };
 
 export const OpenAPI: OpenAPIConfig = {
-  BASE: "https://next-fast-turbo-api.vercel.app",
+  BASE:
+    process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
   VERSION: "0.1.0",
   WITH_CREDENTIALS: false,
   CREDENTIALS: "include",

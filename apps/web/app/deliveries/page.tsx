@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { RoleGate } from "@/components/auth/role-gate";
 import { Package } from "lucide-react";
 import {
   DeliveryTable,
@@ -94,34 +95,38 @@ export default function DeliveriesPage() {
         title="Delivery Queue"
         description="Manage and track all robot deliveries in real-time"
         actions={
-          <Button
-            onClick={() => setShowForm((prev) => !prev)}
-            className="min-h-[44px] touch-manipulation bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm"
-            variant="outline"
-          >
-            {showForm ? "Cancel" : "+ New Delivery"}
-          </Button>
+          <RoleGate allowed={["operator", "admin"]}>
+            <Button
+              onClick={() => setShowForm((prev) => !prev)}
+              className="min-h-[44px] touch-manipulation bg-white/20 hover:bg-white/30 text-white border-white/30 backdrop-blur-sm"
+              variant="outline"
+            >
+              {showForm ? "Cancel" : "+ New Delivery"}
+            </Button>
+          </RoleGate>
         }
       />
 
-      {/* Create form (collapsible) */}
-      {showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Create Delivery</CardTitle>
-            <CardDescription>
-              Add a new delivery to the queue. It will start with
-              &quot;Pending&quot; status.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DeliveryForm
-              onSubmit={handleCreate}
-              isSubmitting={isSubmitting}
-            />
-          </CardContent>
-        </Card>
-      )}
+      {/* Create form (collapsible) — operators and admins only */}
+      <RoleGate allowed={["operator", "admin"]}>
+        {showForm && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Create Delivery</CardTitle>
+              <CardDescription>
+                Add a new delivery to the queue. It will start with
+                &quot;Pending&quot; status.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <DeliveryForm
+                onSubmit={handleCreate}
+                isSubmitting={isSubmitting}
+              />
+            </CardContent>
+          </Card>
+        )}
+      </RoleGate>
 
       {/* Filters */}
       <DeliveryFilters

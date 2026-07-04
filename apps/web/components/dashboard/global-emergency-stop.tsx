@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { OctagonX, AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
 import { getSocket } from "@/lib/socket/client";
+import { ROBOT_ID } from "@/lib/robot";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
@@ -28,8 +29,8 @@ export function GlobalEmergencyStop() {
       }
       const socket = getSocket();
       if (socket.connected) {
-        socket.emit("robot_command", { action: "emergency_stop", robotId: null });
-        toast.error("⛔ Emergency Stop activated — all robots halted", {
+        socket.emit("robot_command", { action: "emergency_stop", robotId: ROBOT_ID });
+        toast.error("⛔ Emergency Stop activated — robot halted", {
           duration: 8000,
           id: "global-estop",
         });
@@ -56,8 +57,17 @@ export function GlobalEmergencyStop() {
   }, [isConfirming, triggerStop]);
 
   const handleResume = useCallback(() => {
-    setIsStopped(false);
-    toast.success("Operations resumed — robot ready for commands");
+    const socket = getSocket();
+    if (socket.connected) {
+      socket.emit("robot_command", { action: "resume", robotId: ROBOT_ID });
+      setIsStopped(false);
+      toast.success("Operations resumed — robot ready for commands");
+    } else {
+      toast.warning("Socket offline — resume was not sent to robot", {
+        duration: 6000,
+        id: "global-estop-resume-warn",
+      });
+    }
   }, []);
 
   return (
@@ -74,7 +84,7 @@ export function GlobalEmergencyStop() {
                 ⛔ ROBOT STOPPED
               </p>
               <p className="mt-2 text-sm text-red-300">
-                Emergency stop has been activated. All robot operations halted.
+                Emergency stop has been activated. Robot operations halted.
               </p>
             </div>
             <Button
@@ -98,7 +108,7 @@ export function GlobalEmergencyStop() {
             ? "Robot stopped — click overlay to resume"
             : isConfirming
               ? "Click again to confirm STOP"
-              : "Emergency Stop — All Robots"
+              : "Emergency Stop"
         }
         className={cn(
           "fixed bottom-6 right-6 z-[100] flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-all duration-300",
@@ -124,4 +134,3 @@ export function GlobalEmergencyStop() {
     </>
   );
 }
-

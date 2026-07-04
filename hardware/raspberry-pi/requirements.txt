@@ -1,0 +1,9 @@
+python-socketio[client]>=5.11.0
+requests>=2.31.0
+pyserial>=3.5
+python-dotenv>=1.0.0
+sounddevice>=0.4.6
+vosk>=0.3.45
+# Raspberry Pi only (install on the Pi, not on dev machine):
+# RPi.GPIO>=0.7.1
+# mfrc522>=0.0.7

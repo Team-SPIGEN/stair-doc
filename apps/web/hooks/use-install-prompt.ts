@@ -49,16 +49,12 @@ function detectInstalled(): boolean {
 export function useInstallPrompt(): UseInstallPromptReturn {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
-  const [installState, setInstallState] = useState<InstallState>("idle");
+  const [installState, setInstallState] = useState<InstallState>(() =>
+    detectInstalled() ? "installed" : "idle",
+  );
   const [isIOS] = useState<boolean>(detectIOS);
 
   useEffect(() => {
-    // Already installed in standalone mode
-    if (detectInstalled()) {
-      setInstallState("installed");
-      return;
-    }
-
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);

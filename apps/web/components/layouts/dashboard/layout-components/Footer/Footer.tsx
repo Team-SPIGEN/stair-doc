@@ -6,7 +6,7 @@ const Footer = () => {
       <div>
         <div className="flex flex-col gap-4 justify-end">
           <div className="text-xs text-muted-foreground">
-            Copyright© Next-Fast-Turbo. All rights reserved.
+            Copyright© Stair-Doc. All rights reserved.
           </div>
         </div>
       </div>

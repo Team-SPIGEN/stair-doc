@@ -5,6 +5,7 @@
  */
 
 import { OpenAPI } from "@/lib/api/client";
+import { getStoredToken } from "@/lib/api/auth";
 
 // ── Types matching backend Pydantic schemas ──────────────────────────────
 
@@ -94,15 +95,28 @@ export class RFIDApiError extends Error {
 
 // ── Fetch helper ─────────────────────────────────────────────────────────
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { auth?: boolean },
+): Promise<T> {
   const url = `${OpenAPI.BASE}${path}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string>),
+  };
+
+  if (options?.auth) {
+    const token = getStoredToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
 
   const response = await fetch(url, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -176,8 +190,12 @@ export async function fetchRFIDTags(): Promise<RFIDTagResponse[]> {
 export async function registerRFIDTag(
   payload: RFIDRegisterPayload,
 ): Promise<RFIDTagResponse> {
-  return apiFetch<RFIDTagResponse>("/api/v1/rfid/tags", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return apiFetch<RFIDTagResponse>(
+    "/api/v1/rfid/tags",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    { auth: true },
+  );
 }

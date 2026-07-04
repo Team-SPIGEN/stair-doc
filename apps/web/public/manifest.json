@@ -58,13 +58,12 @@
       "purpose": "maskable"
     }
   ],
-  "categories": ["business", "productivity"],
   "shortcuts": [
     {
       "name": "Dashboard",
       "short_name": "Dashboard",
       "description": "Live robot telemetry dashboard",
-      "url": "/dashboard",
+      "url": "/",
       "icons": [{ "src": "/icons/shortcut-robot.png", "sizes": "96x96" }]
     },
     {
@@ -80,22 +79,6 @@
       "description": "Unlock delivery container",
       "url": "/rfid",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/screenshots/dashboard.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide",
-      "label": "Dashboard Overview"
-    },
-    {
-      "src": "/screenshots/mobile-dashboard.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "Mobile Dashboard"
     }
   ]
 }

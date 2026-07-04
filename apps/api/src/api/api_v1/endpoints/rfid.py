@@ -8,8 +8,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from src.api.deps import get_current_user, require_role
+from src.schemas.auth import UserRole
+from src.core.bridge import normalize_tag_id
+from src.core.socket import sio
+from src.core.storage import (
+    get_rfid_tag,
+    list_rfid_logs as storage_list_rfid_logs,
+    list_rfid_tags as storage_list_rfid_tags,
+    save_rfid_log,
+    save_rfid_tag,
+)
 from src.schemas.base import ApiResponse, success_response
 from src.schemas.rfid import (
     ContainerStatus,
@@ -27,103 +38,134 @@ router = APIRouter(prefix="/rfid", tags=["rfid"])
 
 # ── Mock In-Memory Stores ────────────────────────────────────────────────
 
-_registered_tags: dict[str, RFIDTagResponse] = {
-    "RFID-A1B2C3": RFIDTagResponse(
-        tag_id="RFID-A1B2C3",
-        user_name="Alice Johnson",
-        role="recipient",
-        status=RFIDTagStatus.ACTIVE,
-        registered_at=datetime.now(UTC) - timedelta(days=30),
-        last_used=datetime.now(UTC) - timedelta(hours=2),
-    ),
-    "RFID-D4E5F6": RFIDTagResponse(
-        tag_id="RFID-D4E5F6",
-        user_name="Bob Smith",
-        role="recipient",
-        status=RFIDTagStatus.ACTIVE,
-        registered_at=datetime.now(UTC) - timedelta(days=14),
-        last_used=datetime.now(UTC) - timedelta(hours=6),
-    ),
-    "RFID-G7H8I9": RFIDTagResponse(
-        tag_id="RFID-G7H8I9",
-        user_name="Carol Williams",
-        role="operator",
-        status=RFIDTagStatus.ACTIVE,
-        registered_at=datetime.now(UTC) - timedelta(days=60),
-        last_used=datetime.now(UTC) - timedelta(days=1),
-    ),
-    "RFID-REVOKED": RFIDTagResponse(
-        tag_id="RFID-REVOKED",
-        user_name="Dave (Revoked)",
-        role="recipient",
-        status=RFIDTagStatus.REVOKED,
-        registered_at=datetime.now(UTC) - timedelta(days=90),
-        last_used=datetime.now(UTC) - timedelta(days=45),
-    ),
-}
+_registered_tags: dict[str, RFIDTagResponse] = {}
 
-_access_logs: list[RFIDLogEntry] = [
-    RFIDLogEntry(
-        id="rfid-log-001",
-        tag_id="RFID-A1B2C3",
-        robot_id="robot-001",
-        delivery_id="del-001",
+_access_logs: list[RFIDLogEntry] = []
+
+
+def _seed_hardware_tags() -> None:
+    """Ensure the three physical demo tags are available after restarts."""
+    seeds = [
+        ("RFID-432745742349", "Authorized User 1"),
+        ("RFID-805223990738", "Authorized User 2"),
+        ("RFID-1023250728362", "Authorized User 3"),
+    ]
+    now = datetime.now(UTC)
+    for tag_id, user_name in seeds:
+        if get_rfid_tag(tag_id):
+            continue
+        tag = RFIDTagResponse(
+            tag_id=tag_id,
+            user_name=user_name,
+            role="recipient",
+            status=RFIDTagStatus.ACTIVE,
+            registered_at=now,
+            last_used=None,
+        )
+        save_rfid_tag(tag.model_dump(mode="json"))
+
+
+def _load_tag(tag_id: str) -> RFIDTagResponse | None:
+    if tag_id in _registered_tags:
+        return _registered_tags[tag_id]
+    raw = get_rfid_tag(tag_id)
+    if raw:
+        return RFIDTagResponse(**raw)
+    return None
+
+
+def _store_tag(tag: RFIDTagResponse) -> None:
+    _registered_tags[tag.tag_id] = tag
+    save_rfid_tag(tag.model_dump(mode="json"))
+
+
+def _store_log(log: RFIDLogEntry) -> None:
+    _access_logs.insert(0, log)
+    save_rfid_log(log.model_dump(mode="json"))
+
+
+async def authorize_scan(body: RFIDAuthorizeRequest) -> RFIDAuthorizeResponse:
+    """Authorize a scan and persist the access log."""
+    _seed_hardware_tags()
+    tag_id = normalize_tag_id(body.tag_id)
+    tag = _load_tag(tag_id)
+    now = datetime.now(UTC)
+
+    if tag is None:
+        log = RFIDLogEntry(
+            id=f"rfid-log-{uuid.uuid4().hex[:8]}",
+            tag_id=tag_id,
+            robot_id=body.robot_id,
+            delivery_id=body.delivery_id,
+            scan_type=RFIDScanType.DENIED,
+            authorized=False,
+            user_name=None,
+            location=None,
+            message="Unknown RFID tag — access denied",
+            timestamp=now,
+        )
+        _store_log(log)
+        return RFIDAuthorizeResponse(
+            authorized=False,
+            tag_id=tag_id,
+            robot_id=body.robot_id,
+            delivery_id=body.delivery_id,
+            container_status=ContainerStatus.LOCKED,
+            user_name=None,
+            message="Tag not recognised. Access denied.",
+            timestamp=now,
+        )
+
+    if tag.status != RFIDTagStatus.ACTIVE:
+        log = RFIDLogEntry(
+            id=f"rfid-log-{uuid.uuid4().hex[:8]}",
+            tag_id=tag_id,
+            robot_id=body.robot_id,
+            delivery_id=body.delivery_id,
+            scan_type=RFIDScanType.DENIED,
+            authorized=False,
+            user_name=tag.user_name,
+            location=None,
+            message=f"Tag status '{tag.status.value}' — access denied",
+            timestamp=now,
+        )
+        _store_log(log)
+        return RFIDAuthorizeResponse(
+            authorized=False,
+            tag_id=tag_id,
+            robot_id=body.robot_id,
+            delivery_id=body.delivery_id,
+            container_status=ContainerStatus.LOCKED,
+            user_name=tag.user_name,
+            message=f"Tag is {tag.status.value}. Access denied.",
+            timestamp=now,
+        )
+
+    updated = tag.model_copy(update={"last_used": now})
+    _store_tag(updated)
+    log = RFIDLogEntry(
+        id=f"rfid-log-{uuid.uuid4().hex[:8]}",
+        tag_id=tag_id,
+        robot_id=body.robot_id,
+        delivery_id=body.delivery_id,
         scan_type=RFIDScanType.UNLOCK,
         authorized=True,
-        user_name="Alice Johnson",
-        location="Building A, Floor 3, Room 305",
-        message="Container unlocked for recipient",
-        timestamp=datetime.now(UTC) - timedelta(hours=2),
-    ),
-    RFIDLogEntry(
-        id="rfid-log-002",
-        tag_id="RFID-D4E5F6",
-        robot_id="robot-002",
-        delivery_id="del-002",
-        scan_type=RFIDScanType.CHECKPOINT,
+        user_name=tag.user_name,
+        location=None,
+        message="Container unlocked successfully",
+        timestamp=now,
+    )
+    _store_log(log)
+    return RFIDAuthorizeResponse(
         authorized=True,
-        user_name="Bob Smith",
-        location="Building B, Floor 2",
-        message="Checkpoint scan — robot passing floor 2",
-        timestamp=datetime.now(UTC) - timedelta(hours=4),
-    ),
-    RFIDLogEntry(
-        id="rfid-log-003",
-        tag_id="RFID-UNKNOWN",
-        robot_id="robot-003",
-        delivery_id=None,
-        scan_type=RFIDScanType.DENIED,
-        authorized=False,
-        user_name=None,
-        location="Building A, Floor 1, Lobby",
-        message="Unknown RFID tag — access denied",
-        timestamp=datetime.now(UTC) - timedelta(hours=6),
-    ),
-    RFIDLogEntry(
-        id="rfid-log-004",
-        tag_id="RFID-G7H8I9",
-        robot_id="robot-001",
-        delivery_id="del-004",
-        scan_type=RFIDScanType.PICKUP,
-        authorized=True,
-        user_name="Carol Williams",
-        location="Building C, Floor 1, Lobby",
-        message="Operator pickup scan — delivery loaded",
-        timestamp=datetime.now(UTC) - timedelta(hours=8),
-    ),
-    RFIDLogEntry(
-        id="rfid-log-005",
-        tag_id="RFID-REVOKED",
-        robot_id="robot-004",
-        delivery_id=None,
-        scan_type=RFIDScanType.DENIED,
-        authorized=False,
-        user_name="Dave (Revoked)",
-        location="Building C, Floor 2, Room 207",
-        message="Tag revoked — access denied",
-        timestamp=datetime.now(UTC) - timedelta(hours=10),
-    ),
-]
+        tag_id=tag_id,
+        robot_id=body.robot_id,
+        delivery_id=body.delivery_id,
+        container_status=ContainerStatus.UNLOCKED,
+        user_name=tag.user_name,
+        message=f"Welcome, {tag.user_name}! Container unlocked.",
+        timestamp=now,
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -141,102 +183,26 @@ _access_logs: list[RFIDLogEntry] = [
     ),
 )
 async def authorize_rfid(body: RFIDAuthorizeRequest) -> dict:
-    tag = _registered_tags.get(body.tag_id)
-    now = datetime.now(UTC)
+    result = await authorize_scan(body)
 
-    if tag is None:
-        # Unknown tag
-        log = RFIDLogEntry(
-            id=f"rfid-log-{uuid.uuid4().hex[:8]}",
-            tag_id=body.tag_id,
-            robot_id=body.robot_id,
-            delivery_id=body.delivery_id,
-            scan_type=RFIDScanType.DENIED,
-            authorized=False,
-            user_name=None,
-            location=None,
-            message="Unknown RFID tag — access denied",
-            timestamp=now,
-        )
-        _access_logs.insert(0, log)
+    await sio.emit("rfid_event", {
+        "tag_id": result.tag_id,
+        "robot_id": body.robot_id,
+        "delivery_id": body.delivery_id,
+        "authorized": result.authorized,
+        "user_name": result.user_name,
+        "scan_type": "unlock" if result.authorized else "denied",
+        "message": result.message,
+        "timestamp": result.timestamp.isoformat(),
+    })
 
-        result = RFIDAuthorizeResponse(
-            authorized=False,
-            tag_id=body.tag_id,
-            robot_id=body.robot_id,
-            delivery_id=body.delivery_id,
-            container_status=ContainerStatus.LOCKED,
-            user_name=None,
-            message="Tag not recognised. Access denied.",
-            timestamp=now,
-        )
-        return success_response(
-            data=result.model_dump(mode="json"),
-            message="RFID authorization failed — unknown tag",
-        )
-
-    if tag.status != RFIDTagStatus.ACTIVE:
-        # Revoked / expired tag
-        log = RFIDLogEntry(
-            id=f"rfid-log-{uuid.uuid4().hex[:8]}",
-            tag_id=body.tag_id,
-            robot_id=body.robot_id,
-            delivery_id=body.delivery_id,
-            scan_type=RFIDScanType.DENIED,
-            authorized=False,
-            user_name=tag.user_name,
-            location=None,
-            message=f"Tag status '{tag.status.value}' — access denied",
-            timestamp=now,
-        )
-        _access_logs.insert(0, log)
-
-        result = RFIDAuthorizeResponse(
-            authorized=False,
-            tag_id=body.tag_id,
-            robot_id=body.robot_id,
-            delivery_id=body.delivery_id,
-            container_status=ContainerStatus.LOCKED,
-            user_name=tag.user_name,
-            message=f"Tag is {tag.status.value}. Access denied.",
-            timestamp=now,
-        )
-        return success_response(
-            data=result.model_dump(mode="json"),
-            message=f"RFID authorization failed — tag {tag.status.value}",
-        )
-
-    # ── Authorized ───────────────────────────────────────────────────
-    # Update last_used timestamp on the tag
-    _registered_tags[body.tag_id] = tag.model_copy(update={"last_used": now})
-
-    log = RFIDLogEntry(
-        id=f"rfid-log-{uuid.uuid4().hex[:8]}",
-        tag_id=body.tag_id,
-        robot_id=body.robot_id,
-        delivery_id=body.delivery_id,
-        scan_type=RFIDScanType.UNLOCK,
-        authorized=True,
-        user_name=tag.user_name,
-        location=None,
-        message="Container unlocked successfully",
-        timestamp=now,
-    )
-    _access_logs.insert(0, log)
-
-    result = RFIDAuthorizeResponse(
-        authorized=True,
-        tag_id=body.tag_id,
-        robot_id=body.robot_id,
-        delivery_id=body.delivery_id,
-        container_status=ContainerStatus.UNLOCKED,
-        user_name=tag.user_name,
-        message=f"Welcome, {tag.user_name}! Container unlocked.",
-        timestamp=now,
-    )
     return success_response(
         data=result.model_dump(mode="json"),
-        message="RFID authorized — container unlocked",
+        message=(
+            "RFID authorized — container unlocked"
+            if result.authorized
+            else "RFID authorization failed"
+        ),
     )
 
 
@@ -260,7 +226,12 @@ async def get_rfid_logs(
     ),
     limit: int = Query(50, ge=1, le=200, description="Max logs to return"),
 ) -> dict:
-    results = list(_access_logs)
+    _seed_hardware_tags()
+    results = [RFIDLogEntry(**log) for log in storage_list_rfid_logs()]
+    if _access_logs:
+        known_ids = {log.id for log in results}
+        results = [*results, *(log for log in _access_logs if log.id not in known_ids)]
+        results.sort(key=lambda r: r.timestamp, reverse=True)
 
     if tag_id is not None:
         results = [r for r in results if r.tag_id == tag_id]
@@ -291,7 +262,11 @@ async def get_rfid_logs(
     description="Returns all registered RFID tags and their current status.",
 )
 async def list_registered_tags() -> dict:
-    tags = list(_registered_tags.values())
+    _seed_hardware_tags()
+    tags = [RFIDTagResponse(**tag) for tag in storage_list_rfid_tags()]
+    if _registered_tags:
+        known_ids = {tag.tag_id for tag in tags}
+        tags.extend(tag for tag in _registered_tags.values() if tag.tag_id not in known_ids)
     return success_response(
         data=[t.model_dump(mode="json") for t in tags],
         message=f"Retrieved {len(tags)} registered tag(s)",
@@ -305,24 +280,28 @@ async def list_registered_tags() -> dict:
     summary="Register a new RFID tag",
     description="Register an RFID tag and assign it to a user with a role.",
 )
-async def register_tag(body: RFIDRegisterRequest) -> dict:
-    if body.tag_id in _registered_tags:
+async def register_tag(
+    body: RFIDRegisterRequest,
+    _admin: dict = Depends(require_role(UserRole.ADMIN)),
+) -> dict:
+    tag_id = normalize_tag_id(body.tag_id)
+    if _load_tag(tag_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Tag '{body.tag_id}' is already registered",
+            detail=f"Tag '{tag_id}' is already registered",
         )
 
     now = datetime.now(UTC)
     tag = RFIDTagResponse(
-        tag_id=body.tag_id,
+        tag_id=tag_id,
         user_name=body.user_name,
         role=body.role,
         status=RFIDTagStatus.ACTIVE,
         registered_at=now,
         last_used=None,
     )
-    _registered_tags[body.tag_id] = tag
+    _store_tag(tag)
     return success_response(
         data=tag.model_dump(mode="json"),
-        message=f"Tag '{body.tag_id}' registered for {body.user_name}",
+        message=f"Tag '{tag_id}' registered for {body.user_name}",
     )

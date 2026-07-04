@@ -310,24 +310,21 @@ async def test_status_specific_robot():
     """Status for a specific robot ID works."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get("/api/v1/navigation/status?robot_id=robot-002")
+        resp = await ac.get("/api/v1/navigation/status?robot_id=robot-001")
 
     assert resp.status_code == 200
     data = _assert_envelope(resp.json())
-    assert data["robot_id"] == "robot-002"
+    assert data["robot_id"] == "robot-001"
 
 
 @pytest.mark.anyio
 async def test_status_unknown_robot():
-    """Status for a new robot ID auto-creates idle state."""
+    """Status for an unknown robot ID returns 404."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get("/api/v1/navigation/status?robot_id=robot-999")
 
-    assert resp.status_code == 200
-    data = _assert_envelope(resp.json())
-    assert data["robot_id"] == "robot-999"
-    assert data["mode"] == "idle"
+    assert resp.status_code == 404
 
 
 @pytest.mark.anyio
@@ -364,7 +361,7 @@ async def test_status_reflects_autonomous_mode():
     data = _assert_envelope(resp.json())
     assert data["mode"] == "autonomous"
     assert data["target_floor"] == 4
-    assert data["progress"] > 0  # should have incremented
+    assert data["progress"] == 0.0
 
 
 @pytest.mark.anyio
@@ -451,7 +448,7 @@ async def test_full_lifecycle():
     """Complete lifecycle: idle → manual → autonomous → emergency → reset → idle."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        robot = "robot-003"
+        robot = "robot-001"
         await _reset_state(ac, robot)
 
         # 1. Idle

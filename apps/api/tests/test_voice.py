@@ -38,7 +38,7 @@ async def test_voice_emergency_requires_confirmation():
             json={
                 "text": "emergency stop now",
                 "user_role": "operator",
-                "robot_id": "robot-002",
+                "robot_id": "robot-001",
             },
         )
 
@@ -57,7 +57,7 @@ async def test_voice_recipient_blocked_from_navigation():
             json={
                 "text": "go to floor 3",
                 "user_role": "recipient",
-                "robot_id": "robot-003",
+                "robot_id": "robot-001",
             },
         )
 
@@ -149,7 +149,7 @@ async def test_voice_confirm_emergency():
             json={
                 "text": "emergency stop now",
                 "user_role": "operator",
-                "robot_id": "robot-002",
+                "robot_id": "robot-001",
                 "confirm": True,
             },
         )

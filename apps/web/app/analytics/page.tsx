@@ -21,8 +21,10 @@ import {
   TrendingUp,
   Clock,
   BarChart2,
+  Shield,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
+import { RoleGate } from "@/components/auth/role-gate";
 import { DateRangePicker } from "@/components/analytics/date-range-picker";
 import { DeliveryTrendChart } from "@/components/analytics/delivery-trend-chart";
 import { DeliverySuccessGauge } from "@/components/analytics/delivery-success-gauge";
@@ -85,7 +87,28 @@ function KpiCard({
 
 // ── Page ─────────────────────────────────────────────────────────────────
 
-export default function AnalyticsPage() {
+function AnalyticsAccessDenied() {
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        icon={BarChart2}
+        title="Robot Performance Analytics"
+        description="Stair-climbing delivery metrics and operational reports"
+      />
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+          <Shield className="mb-4 h-12 w-12 text-muted-foreground/40" />
+          <p className="text-sm font-medium">Administrator access required</p>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            Analytics and export reports are only available to admin accounts.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AnalyticsContent() {
   const [days, setDays] = useState<DateRange>(30);
   const [selectedFloor, setSelectedFloor] = useState<string | null>(null);
   const { data, isLoading, error, lastUpdated, refresh } = useAnalytics(days);
@@ -398,5 +421,13 @@ export default function AnalyticsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function AnalyticsPage() {
+  return (
+    <RoleGate allowed={["admin"]} fallback={<AnalyticsAccessDenied />}>
+      <AnalyticsContent />
+    </RoleGate>
   );
 }

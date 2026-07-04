@@ -56,10 +56,10 @@
 ### Monorepo Structure
 
 ```
-next-fast-turbo/
+stair-doc/
 ├── apps/
 │   ├── web/          # Next.js 16 + Tailwind + shadcn/ui (PWA)
-│   ├── api/          # FastAPI + Pydantic + PostgreSQL
+│   ├── api/          # FastAPI + Socket.IO + in-memory stores
 │   └── docs/         # Mintlify documentation
 └── packages/
     ├── eslint-config/
@@ -96,7 +96,7 @@ pnpm dev --filter web        # http://localhost:3000
 
 ```bash
 cd apps/api
-cp .env.example .env         # set SUPABASE_URL, SECRET_KEY, VAPID_* keys
+cp .env.example .env         # set JWT_SECRET_KEY, ROBOT_BRIDGE_TOKEN, VAPID_* keys
 poetry install
 poetry run uvicorn src.main:app --reload --port 8000
 # Swagger UI → http://localhost:8000/docs
@@ -115,17 +115,28 @@ pnpm dev        # starts web + api concurrently via Turborepo
 ### Frontend → Vercel
 
 1. Import the repo; set **Root Directory** to `apps/web`
-2. Add environment variables as Vercel secrets:
+2. Add environment variables:
    - `NEXT_PUBLIC_API_URL` → Railway backend URL
    - `NEXT_PUBLIC_SOCKET_URL` → same as API URL
    - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` → from VAPID key generation
-3. `apps/web/vercel.json` handles security headers, service worker cache rules, and PWA manifest content-type automatically
+3. Production frontend builds fail fast if `NEXT_PUBLIC_API_URL` is missing, so the live app never falls back to `localhost`
+4. `apps/web/vercel.json` handles security headers, service worker cache rules, and PWA manifest content-type automatically
 
 ### Backend → Railway
 
 1. Create a Railway project and connect the repo; set **Root Directory** to `apps/api`
 2. `apps/api/railway.toml` is auto-detected (nixpacks build, uvicorn start, `/health` healthcheck)
-3. Set env vars: `SUPABASE_URL`, `SECRET_KEY`, `VAPID_PRIVATE_KEY`, `CORS_ORIGINS`
+3. Set env vars before switching to production:
+   - `ENVIRONMENT=production`
+   - `JWT_SECRET_KEY` → unique random value, at least 32 characters
+   - `DEMO_USER_PASSWORD` → temporary non-default password for the demo users
+   - `ROBOT_BRIDGE_TOKEN` → unique random bridge token, at least 16 characters
+   - `CORS_ORIGINS` → deployed Vercel origin, for example `https://your-app.vercel.app`
+   - `SOCKET_CORS_ORIGINS` → deployed Vercel origin plus the deployed Railway API origin used by the Pi bridge
+   - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_MAILTO`
+
+The API intentionally fails startup in `ENVIRONMENT=production` if the JWT secret,
+demo password, bridge token, or CORS origin still use unsafe defaults.
 
 ### VAPID Key Generation
 
@@ -144,51 +155,55 @@ print('Private:', v.private_key)
 
 ## 🤖 Robot Pi Integration
 
-### ROS2 → WebSocket Bridge
+See **[hardware/INTEGRATION.md](hardware/INTEGRATION.md)** for the complete wiring guide.
+
+### Quick start
 
 ```bash
-# On the Pi
-pip install python-socketio requests
+# 1. Run API + PWA (see Getting Started above)
+
+# 2. Flash the ESP32
+# Open hardware/esp32/stairdoc_robot_usb_bt/stairdoc_robot_usb_bt.ino
+# in Arduino IDE and flash it to the ESP32.
+
+# 3. On the Raspberry Pi
+cd hardware/raspberry-pi
+cp .env.example .env   # set STAIRDOC_API_URLS to the Mac/API IP
+pip install -r requirements.txt
+python bridge.py
 ```
 
-```python
-import socketio
-sio = socketio.Client()
-sio.connect("https://your-api.railway.app")
+The Pi bridge registers via Socket.IO, forwards navigation commands to the ESP32, and pushes live telemetry to the app.
 
-def odom_callback(msg):
-    sio.emit("robot_telemetry", {
-        "robotId": "pi-001",
-        "location": {
-            "x": msg.pose.pose.position.x,
-            "y": msg.pose.pose.position.y,
-            "speed": msg.twist.twist.linear.x,
-        },
-        "battery": {"level": 85, "isCharging": False},
-    })
-```
+### Socket.IO events
+
+| Direction | Event | Purpose |
+|-----------|-------|---------|
+| Pi → API | `bridge_register` | Register as `robot-001` |
+| Pi → API | `bridge_telemetry` | Live sensor data from ESP32 |
+| API → Pi | `bridge_command` | Forward joystick/E-stop commands |
+| App → API | `navigation_command` | Manual/autonomous control |
+| App → API | `robot_command` | Emergency stop |
 
 ### RFID RC522 (SPI)
 
 ```python
-from mfrc522 import SimpleMFRC522
 import requests
+from mfrc522 import SimpleMFRC522
 
 reader = SimpleMFRC522()
-while True:
-    tag_id, _ = reader.read()
-    requests.post("https://your-api.railway.app/api/v1/rfid/scan",
-                  json={"tag_id": str(tag_id), "robot_id": "pi-001"})
+tag_id, _ = reader.read()
+requests.post(
+    "https://your-api.railway.app/api/v1/rfid/authorize",
+    json={"tag_id": str(tag_id), "robot_id": "robot-001"},
+)
 ```
 
-### SLAM (SLAM Toolbox)
+Numeric tag UIDs are auto-normalized to `RFID-{uid}`.
 
-```bash
-ros2 launch slam_toolbox online_async_launch.py \
-  slam_params_file:=./config/mapper_params_online_async.yaml
-```
+### Ultrasonic obstacle display (no LIDAR required)
 
-The SLAM pose is forwarded to the frontend via the `lidar_map` Socket.IO event.
+The bridge converts ESP32 ultrasonic readings into a pseudo-LIDAR scan for the navigation page. Real LIDAR/SLAM can be added later via the `bridge_lidar` event.
 
 ---
 
@@ -198,7 +213,7 @@ Active on every page — suppressed while typing in inputs.
 
 | Key                  | Action                                                    |
 | -------------------- | --------------------------------------------------------- |
-| `Space` (hold 0.8 s) | **Emergency stop** — sends `emergency_stop` to all robots |
+| `Space` (hold 0.8 s) | **Emergency stop** — sends `emergency_stop` to the robot |
 | `R`                  | Refresh robot status                                      |
 | `N`                  | Go to Navigation                                          |
 | `C`                  | Go to Camera feed                                         |

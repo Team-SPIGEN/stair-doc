@@ -288,6 +288,10 @@ export default function SettingsPage() {
                 label: "Delivery Management",
                 roles: ["operator", "admin", "recipient"],
               },
+              {
+                label: "Create Deliveries",
+                roles: ["operator", "admin"],
+              },
               { label: "Navigation Controls", roles: ["operator", "admin"] },
               {
                 label: "RFID Unlock",
@@ -341,6 +345,9 @@ export default function SettingsPage() {
             keys={["Space"]}
             action="Emergency Stop (hold 0.8 s)"
           />
+          <ShortcutRow keys={["Ctrl", "B"]} action="Toggle sidebar" />
+          <ShortcutRow keys={["G", "D"]} action="Go to Dashboard (Overview)" />
+          <ShortcutRow keys={["G", "L"]} action="Go to Deliveries" />
           <ShortcutRow keys={["R"]} action="Refresh robot status" />
           <ShortcutRow keys={["N"]} action="Go to Navigation" />
           <ShortcutRow keys={["C"]} action="Go to Camera" />

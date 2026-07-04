@@ -12,7 +12,7 @@ import { GlobalEmergencyStop } from "@/components/dashboard/global-emergency-sto
  */
 export function AuthAwareLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === "/auth";
+  const isAuthPage = pathname.replace(/\/$/, "") === "/auth";
 
   return (
     <AuthProvider>

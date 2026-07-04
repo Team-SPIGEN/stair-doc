@@ -24,6 +24,20 @@ export interface RobotTelemetryPayload {
   timestamp: string;
 }
 
+export interface BridgeRobotPayload {
+  robot_id: string;
+  session_id: string;
+  connected: boolean;
+  last_telemetry: string | null;
+  seconds_since_telemetry: number | null;
+}
+
+export interface BridgeStatusPayload {
+  connected_count: number;
+  robots: BridgeRobotPayload[];
+  timestamp: string;
+}
+
 export interface SystemHealthPayload {
   cpu_usage: number;
   memory_usage: number;
@@ -33,6 +47,8 @@ export interface SystemHealthPayload {
   camera_status: "operational" | "degraded" | "offline";
   mqtt_connected: boolean;
   database_connected: boolean;
+  bridge_connected?: boolean;
+  bridge?: BridgeStatusPayload;
   uptime_seconds: number;
   active_connections: number;
   errors_last_hour: number;

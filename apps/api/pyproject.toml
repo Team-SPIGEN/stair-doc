@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "api"
 version = "0.1.0"
-description = ""
-authors = ["cording12 <joncording12@gmail.com>"]
+description = "Stair-Doc delivery robot control API"
+authors = ["Stair-Doc Team"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -11,18 +11,16 @@ uvicorn = "^0.34.0"
 email-validator = "^2.3.0"
 pydantic-settings = "^2.7.0"
 python-dotenv = "^1.2.1"
-supabase = "^2.15.0"
+websockets = ">=13.0,<16"
 python-socketio = {version = "^5.16.0", extras = ["asgi"]}
 python-multipart = ">=0.0.18"
 python-jose = {version = "^3.3.0", extras = ["cryptography"]}
 bcrypt = ">=4.0.0"
+pywebpush = "^2.0.0"
 
 [tool.poetry.group.dev.dependencies]
-isort = "^5.13.2"
-black = "^24.10.0"
 pytest = "^8.4.2"
 pytest-asyncio = ">=0.23"
-pylint-pydantic = "^0.4.1"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

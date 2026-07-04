@@ -1,7 +1,7 @@
 .dashboardWrapper {
-  grid-template-columns: min-content auto;
+  grid-template-columns: min-content minmax(0, 1fr);
   grid-template-areas: "sidebar main";
-  --header-height: 5rem;
+  --header-height: 4rem;
   --footer-height: 2rem;
   --small-spacing: 1rem; /* tw class: gap-4, m-4 etc. */
   --large-spacing: 2rem; /* tw class: gap-8, m-8 etc. */
@@ -9,25 +9,33 @@
   --footer-size: calc(var(--footer-height) + var(--small-spacing));
 }
 
+@media (min-width: 640px) {
+  .dashboardWrapper {
+    --header-height: 5rem;
+  }
+}
+
 .dashboardSidebar {
   grid-area: sidebar;
 }
 
 .dashboardMain {
-  @apply gap-[var(--large-spacing)];
+  @apply min-w-0 gap-[var(--large-spacing)];
   grid-area: main;
-  grid-template-rows: var(--header-height) calc(
-      100vh - (var(--header-height) + var(--footer-height))
-    );
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
   grid-template-areas: "header" "content";
+  overflow-y: auto;
 }
 
 .dashboardHeader {
   grid-area: header;
+  min-width: 0;
 }
 
 .dashboardContent {
   grid-area: content;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .dashboardContentWrapper {

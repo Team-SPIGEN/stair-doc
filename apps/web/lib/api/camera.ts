@@ -218,6 +218,14 @@ export async function fetchPhoto(photoId: string): Promise<PhotoResponse> {
 }
 
 /**
+ * Build an absolute API URL for photo/thumbnail image bytes.
+ */
+export function photoAssetUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${OpenAPI.BASE}${path}`;
+}
+
+/**
  * List all camera streams (one per robot).
  */
 export async function fetchCameraStreams(): Promise<CameraStreamInfo[]> {

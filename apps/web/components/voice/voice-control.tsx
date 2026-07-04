@@ -238,6 +238,8 @@ export function VoiceControl({
       { label: "Floor 3", text: "Go to floor 3" },
       { label: "Floor 4", text: "Go to floor 4" },
       { label: "Return home", text: "Return home", icon: Home },
+      { label: "Where are you", text: "Where are you" },
+      { label: "Battery", text: "Battery status" },
       { label: "Unlock container", text: "Unlock container", icon: Lock },
       { label: "Take photo", text: "Take a photo", icon: Camera },
       { label: "Emergency stop", text: "Emergency stop now", destructive: true, icon: ShieldAlert },
@@ -419,4 +421,3 @@ export function VoiceControl({
     </Card>
   );
 }
-

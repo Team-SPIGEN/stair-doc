@@ -62,6 +62,7 @@ export function InstallPromptBanner() {
               src="/icons/icon-192x192.png"
               alt="StairDoc"
               fill
+              sizes="48px"
               className="object-cover"
             />
           </div>

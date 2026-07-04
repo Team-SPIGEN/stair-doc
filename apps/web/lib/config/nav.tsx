@@ -88,7 +88,7 @@ export const navConfig: NavConfig = {
       href: "/navigation",
       pageTitle: "Navigation Controls",
       navLocation: "top",
-      roles: ["operator", "admin"],
+      // Visible for demo/manual control access.
     },
     {
       icon: <Icons.settings className="h-5 w-5" />,
@@ -98,14 +98,6 @@ export const navConfig: NavConfig = {
       pageTitle: "Settings",
       navLocation: "bottom",
       roles: ["operator", "admin"],
-    },
-    {
-      icon: <Icons.file className="h-5 w-5" />,
-      iconMobile: <Icons.file className="h-5 w-5" />,
-      label: "Docs",
-      href: "https://next-fast-turbo.mintlify.app/",
-      pageTitle: "Documentation",
-      navLocation: "bottom",
     },
   ],
 };

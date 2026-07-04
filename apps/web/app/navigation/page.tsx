@@ -41,6 +41,7 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCcw,
+  Cpu,
 } from "lucide-react";
 import { Joystick } from "@/components/navigation/joystick";
 import { LidarViz } from "@/components/navigation/lidar-viz";
@@ -55,16 +56,8 @@ import {
   type NavigationCommand,
   type AutonomousResponse,
 } from "@/lib/api/navigation";
+import { ROBOT_ID, ROBOT_NAME } from "@/lib/robot";
 import { cn } from "@/lib/utils";
-
-// ── Robot list (mock) ────────────────────────────────────────────────────
-
-const ROBOTS = [
-  { id: "robot-001", name: "StairBot Alpha" },
-  { id: "robot-002", name: "StairBot Beta" },
-  { id: "robot-003", name: "StairBot Gamma" },
-  { id: "robot-004", name: "StairBot Delta" },
-];
 
 // ── Mode badge ───────────────────────────────────────────────────────────
 
@@ -110,7 +103,7 @@ function DirectionIndicator({ command }: { command: NavigationCommand | null }) 
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function NavigationPage() {
-  const [robotId, setRobotId] = useState("robot-001");
+  const robotId = ROBOT_ID;
   const [lastCommand, setLastCommand] = useState<NavigationCommand | null>(null);
   const [lastSpeed, setLastSpeed] = useState(0);
 
@@ -129,21 +122,38 @@ export default function NavigationPage() {
   const {
     isConnected,
     lidarPoints,
+    mapPoints,
     lidarFov,
     navStatus,
     isEmergency,
+    robot,
+    bridgeConnected,
     sendNavCommand,
   } = useNavigationSocket();
+  const esp32Connected = robot?.sensors.esp32_connected ?? false;
+  const esp32Port = robot?.sensors.esp32_port ?? "not detected";
+  const esp32Connection = robot?.sensors.esp32_connection ?? "serial";
+  const mode = navStatus?.mode ?? "idle";
+  const isAutonomous = mode === "autonomous" || autoMode;
+  const movementDisabled = isEmergency || isAutonomous || !esp32Connected;
+  const disabledReason = isEmergency
+    ? "Emergency stop active"
+    : isAutonomous
+      ? "Autonomous mode active"
+      : !esp32Connected
+        ? "ESP32 link missing"
+        : "Joystick disabled";
 
   // ── Joystick command handler ──────────────────────────────────────────
 
   const handleJoystickCommand = useCallback(
     (command: NavigationCommand, speed: number) => {
+      if (command !== "stop" && movementDisabled) return;
       setLastCommand(command);
       setLastSpeed(speed);
       sendNavCommand(command, robotId, { speed });
     },
-    [robotId, sendNavCommand],
+    [movementDisabled, robotId, sendNavCommand],
   );
 
   // ── Keyboard controls ─────────────────────────────────────────────────
@@ -162,7 +172,7 @@ export default function NavigationPage() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const cmd = keyMap[e.key];
-      if (cmd && !isEmergency && !autoMode) {
+      if (cmd && !isEmergency && !isAutonomous) {
         e.preventDefault();
         handleJoystickCommand(cmd, 0.5);
       }
@@ -184,7 +194,7 @@ export default function NavigationPage() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [handleJoystickCommand, isEmergency, autoMode]);
+  }, [handleJoystickCommand, isEmergency, isAutonomous]);
 
   // ── Autonomous navigation ──────────────────────────────────────────────
 
@@ -198,8 +208,18 @@ export default function NavigationPage() {
         target_location: targetLocation || undefined,
       });
       setAutoResponse(resp);
-      sendNavCommand("autonomous", robotId, { target_floor: targetFloor });
+      setAutoMode(true);
+      sendNavCommand("autonomous", robotId, {
+        target_floor: targetFloor,
+        targetFloor: targetFloor,
+        target_location: targetLocation || undefined,
+        targetLocation: targetLocation || undefined,
+        eta_seconds: resp.eta_seconds,
+        etaSeconds: resp.eta_seconds,
+        speed: 0.7,
+      });
     } catch (err) {
+      setAutoMode(false);
       setAutoError(err instanceof Error ? err.message : "Failed to start");
     } finally {
       setAutoLoading(false);
@@ -228,7 +248,6 @@ export default function NavigationPage() {
 
   // ── Compute display values ─────────────────────────────────────────────
 
-  const mode = navStatus?.mode ?? "idle";
   const progress = navStatus?.progress ?? 0;
   const eta = navStatus?.eta_seconds ?? autoResponse?.eta_seconds ?? null;
   const currentSpeed = navStatus?.current_speed ?? lastSpeed;
@@ -272,20 +291,9 @@ export default function NavigationPage() {
       />
       {/* ── Header Row ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <Label className="text-xs">Robot</Label>
-          <Select
-            value={robotId}
-            onChange={(e) => setRobotId(e.target.value)}
-            className="h-8 w-44 text-xs"
-          >
-            {ROBOTS.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <Badge variant="outline" className="text-xs">
+          {ROBOT_NAME}
+        </Badge>
 
         <div className="flex items-center gap-2">
           {isConnected ? (
@@ -300,6 +308,17 @@ export default function NavigationPage() {
             </Badge>
           )}
           <ModeBadge mode={mode} />
+          {esp32Connected ? (
+            <Badge variant="success" className="gap-1">
+              <Cpu className="h-3 w-3" />
+              ESP32 Ready
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="gap-1">
+              <Cpu className="h-3 w-3" />
+              ESP32 Missing
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -321,7 +340,8 @@ export default function NavigationPage() {
               <Joystick
                 onCommand={handleJoystickCommand}
                 size={180}
-                disabled={isEmergency || autoMode}
+                disabled={movementDisabled}
+                disabledLabel={disabledReason}
               />
 
               <div className="flex w-full items-center justify-between text-xs">
@@ -341,14 +361,14 @@ export default function NavigationPage() {
             </CardContent>
           </Card>
 
-          {/* Quick buttons for mobile */}
-          <div className="grid grid-cols-3 gap-1.5 lg:hidden">
+          {/* Direction buttons */}
+          <div className="grid grid-cols-3 gap-1.5">
             <div />
             <Button
               size="sm"
               variant="outline"
               className="min-h-[44px]"
-              disabled={isEmergency || autoMode}
+              disabled={movementDisabled}
               onClick={() => handleJoystickCommand("forward", 0.5)}
             >
               <ArrowUp className="h-4 w-4" />
@@ -358,7 +378,7 @@ export default function NavigationPage() {
               size="sm"
               variant="outline"
               className="min-h-[44px]"
-              disabled={isEmergency || autoMode}
+              disabled={movementDisabled}
               onClick={() => handleJoystickCommand("left", 0.5)}
             >
               <ArrowLeft className="h-4 w-4" />
@@ -367,7 +387,7 @@ export default function NavigationPage() {
               size="sm"
               variant="outline"
               className="min-h-[44px]"
-              disabled={isEmergency || autoMode}
+              disabled={isEmergency}
               onClick={() => handleJoystickCommand("stop", 0)}
             >
               <StopCircle className="h-4 w-4" />
@@ -376,7 +396,7 @@ export default function NavigationPage() {
               size="sm"
               variant="outline"
               className="min-h-[44px]"
-              disabled={isEmergency || autoMode}
+              disabled={movementDisabled}
               onClick={() => handleJoystickCommand("right", 0.5)}
             >
               <ArrowRight className="h-4 w-4" />
@@ -386,13 +406,57 @@ export default function NavigationPage() {
               size="sm"
               variant="outline"
               className="min-h-[44px]"
-              disabled={isEmergency || autoMode}
+              disabled={movementDisabled}
               onClick={() => handleJoystickCommand("backward", 0.5)}
             >
               <ArrowDown className="h-4 w-4" />
             </Button>
             <div />
           </div>
+
+          {/* Servo buttons */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Servo Sweeps</CardTitle>
+              <CardDescription className="text-xs">
+                ESP32 commands u/d/v/e
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={movementDisabled}
+                onClick={() => sendNavCommand("front_servo_up", robotId)}
+              >
+                Front Up
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={movementDisabled}
+                onClick={() => sendNavCommand("front_servo_down", robotId)}
+              >
+                Front Down
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={movementDisabled}
+                onClick={() => sendNavCommand("rear_servo_up", robotId)}
+              >
+                Rear Up
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={movementDisabled}
+                onClick={() => sendNavCommand("rear_servo_down", robotId)}
+              >
+                Rear Down
+              </Button>
+            </CardContent>
+          </Card>
         </div>
 
         {/* ── CENTRE: LIDAR Visualization ──────────────────────────── */}
@@ -403,12 +467,12 @@ export default function NavigationPage() {
               LIDAR Visualization
             </CardTitle>
             <CardDescription className="text-xs">
-              Real-time 2D point cloud • {lidarPoints.length} points • {lidarFov}° FOV
+              Real-time 2D map • {(mapPoints.length || lidarPoints.length)} points • {lidarFov}° FOV
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-1 items-center justify-center p-4">
             <LidarViz
-              points={lidarPoints}
+              points={mapPoints.length ? mapPoints : lidarPoints}
               fov={lidarFov}
               heading={heading}
               path={
@@ -420,6 +484,17 @@ export default function NavigationPage() {
               maxRange={6}
             />
           </CardContent>
+          <div className="border-t px-4 pb-4">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => sendNavCommand("reset_map", robotId)}
+            >
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Reset Map
+            </Button>
+          </div>
         </Card>
 
         {/* ── RIGHT: Autonomous Controls & Status ──────────────────── */}
@@ -442,7 +517,7 @@ export default function NavigationPage() {
                   value={String(targetFloor)}
                   onChange={(e) => setTargetFloor(Number(e.target.value))}
                   className="h-8 text-xs"
-                  disabled={autoMode}
+                  disabled={isAutonomous}
                 >
                   {Array.from({ length: 10 }, (_, i) => (
                     <option key={i} value={i}>
@@ -460,7 +535,7 @@ export default function NavigationPage() {
                   onChange={(e) => setTargetLocation(e.target.value)}
                   placeholder="Optional room"
                   className="flex h-8 w-full rounded-md border border-input bg-background px-3 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  disabled={autoMode}
+                  disabled={isAutonomous}
                 />
               </div>
 
@@ -468,15 +543,12 @@ export default function NavigationPage() {
                 <p className="text-xs text-destructive">{autoError}</p>
               )}
 
-              {!autoMode ? (
+              {!isAutonomous ? (
                 <Button
                   size="sm"
                   className="w-full"
-                  onClick={() => {
-                    setAutoMode(true);
-                    handleStartAutonomous();
-                  }}
-                  disabled={isEmergency || autoLoading}
+                  onClick={handleStartAutonomous}
+                  disabled={isEmergency || autoLoading || !esp32Connected}
                 >
                   <MapPin className="mr-2 h-4 w-4" />
                   {autoLoading ? "Starting…" : "Start Navigation"}
@@ -496,7 +568,7 @@ export default function NavigationPage() {
           </Card>
 
           {/* Progress card (visible during autonomous) */}
-          {autoMode && (
+          {isAutonomous && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Navigation Progress</CardTitle>
@@ -578,6 +650,32 @@ export default function NavigationPage() {
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Heading</span>
                 <span className="font-mono">{heading.toFixed(0)}°</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Pi Bridge</span>
+                {bridgeConnected ? (
+                  <Badge variant="success" className="text-[10px]">
+                    LIVE
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive" className="text-[10px]">
+                    OFFLINE
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-muted-foreground">ESP32 Link</span>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Badge
+                    variant={esp32Connected ? "success" : "destructive"}
+                    className="text-[10px]"
+                  >
+                    {esp32Connected ? "READY" : "MISSING"}
+                  </Badge>
+                  <span className="truncate font-mono text-muted-foreground">
+                    {esp32Connection}:{esp32Port}
+                  </span>
+                </div>
               </div>
             </CardContent>
           </Card>

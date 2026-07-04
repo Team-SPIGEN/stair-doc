@@ -28,6 +28,7 @@ import {
   fetchCameraStreams,
   type CameraStreamInfo,
 } from "@/lib/api/camera";
+import { ROBOT_ID } from "@/lib/robot";
 import { getSocket } from "@/lib/socket/client";
 import { cn } from "@/lib/utils";
 
@@ -127,7 +128,7 @@ function StreamPlaceholder({
 
 export function CameraViewer() {
   const [streams, setStreams] = useState<CameraStreamInfo[]>([]);
-  const [selectedRobotId, setSelectedRobotId] = useState<string | null>(null);
+  const [selectedRobotId, setSelectedRobotId] = useState<string>(ROBOT_ID);
   const [isLoading, setIsLoading] = useState(true);
   const [socketConnected, setSocketConnected] = useState(false);
   const [lastSnapshot, setLastSnapshot] = useState<string | null>(null);
@@ -145,16 +146,13 @@ export function CameraViewer() {
     try {
       const data = await fetchCameraStreams();
       setStreams(data);
-      if (data.length > 0 && !selectedRobotId) {
-        const active = data.find((s) => s.stream_active);
-        setSelectedRobotId(active?.robot_id ?? data[0].robot_id);
-      }
+      setSelectedRobotId(ROBOT_ID);
     } catch {
       // Graceful degrade
     } finally {
       setIsLoading(false);
     }
-  }, [selectedRobotId]);
+  }, []);
 
   useEffect(() => {
     loadStreams();
@@ -321,10 +319,10 @@ export function CameraViewer() {
 
       <CardContent className="space-y-4">
         {/* Robot selector + quality */}
-        {streams.length > 0 && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+          {streams.length > 1 && (
             <Select
-              value={selectedRobotId ?? ""}
+              value={selectedRobotId}
               onChange={(e) => setSelectedRobotId(e.target.value)}
               className="w-full sm:w-[240px]"
             >
@@ -334,28 +332,28 @@ export function CameraViewer() {
                 </option>
               ))}
             </Select>
+          )}
 
-            <Select
-              value={quality}
-              onChange={(e) => setQuality(e.target.value as StreamQuality)}
-              className="w-full sm:w-[180px]"
-            >
-              <option value="low">{QUALITY_PRESETS.low.label}</option>
-              <option value="med">{QUALITY_PRESETS.med.label}</option>
-              <option value="high">{QUALITY_PRESETS.high.label}</option>
-            </Select>
+          <Select
+            value={quality}
+            onChange={(e) => setQuality(e.target.value as StreamQuality)}
+            className="w-full sm:w-[180px]"
+          >
+            <option value="low">{QUALITY_PRESETS.low.label}</option>
+            <option value="med">{QUALITY_PRESETS.med.label}</option>
+            <option value="high">{QUALITY_PRESETS.high.label}</option>
+          </Select>
 
-            {selectedStream && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span>{selectedStream.resolution}</span>
-                <span>{selectedStream.fps} fps</span>
-                <span className="capitalize">
-                  {selectedStream.camera_source} cam
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+          {selectedStream && (
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>{selectedStream.resolution}</span>
+              <span>{selectedStream.fps} fps</span>
+              <span className="capitalize">
+                {selectedStream.camera_source} cam
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* Video feed area */}
         {selectedStream ? (

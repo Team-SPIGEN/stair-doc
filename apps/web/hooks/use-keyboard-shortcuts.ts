@@ -4,6 +4,7 @@ import { useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { getSocket } from "@/lib/socket/client";
+import { toggleSidebarCollapsed } from "@/lib/sidebar-toggle";
 
 export interface KeyboardShortcutsOptions {
   /** Disable all shortcuts (e.g. when a modal / input is focused) */
@@ -16,14 +17,19 @@ export interface KeyboardShortcutsOptions {
   onEscape?: () => void;
 }
 
-const SHORTCUT_HELP = [
-  { key: "Space", action: "Emergency Stop (hold 1 s)" },
+const G_CHORD_MS = 1500;
+
+export const SHORTCUT_HELP = [
+  { key: "Space (hold)", action: "Emergency Stop" },
+  { key: "Ctrl+B", action: "Toggle sidebar" },
+  { key: "G → D", action: "Go to Dashboard (Overview)" },
+  { key: "G → L", action: "Go to Deliveries" },
   { key: "R", action: "Refresh robot status" },
   { key: "N", action: "Go to Navigation" },
   { key: "C", action: "Go to Camera" },
   { key: "D", action: "Go to Deliveries" },
   { key: "V", action: "Toggle voice commands" },
-  { key: "?", action: "Show this help" },
+  { key: "?", action: "Show shortcut help" },
   { key: "Esc", action: "Close / stop" },
 ];
 
@@ -32,23 +38,14 @@ const SHORTCUT_HELP = [
  *
  * Mount once at the root layout level (via a `<KeyboardShortcutsProvider>` client component).
  * Shortcuts are suppressed when the active element is an input, textarea, or select.
- *
- * | Key   | Action                                               |
- * |-------|------------------------------------------------------|
- * | Space | Emergency stop — must be held for ~800 ms             |
- * | R     | Re-subscribe robot socket (force refresh)           |
- * | N     | Navigate to /navigation                             |
- * | C     | Navigate to /camera                                 |
- * | D     | Navigate to /deliveries                             |
- * | V     | Toggle voice commands                               |
- * | ?     | Print shortcut cheatsheet toast                     |
- * | Esc   | Fire onEscape callback                             |
  */
 export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
   const { disabled = false, onEmergencyStop, onToggleVoice, onEscape } = options;
   const router = useRouter();
   const spaceHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spaceConfirmed = useRef(false);
+  const gChordActive = useRef(false);
+  const gChordTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isTyping = useCallback(() => {
     const tag = document.activeElement?.tagName.toLowerCase();
@@ -56,12 +53,26 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     return tag === "input" || tag === "textarea" || tag === "select" || isEditable;
   }, []);
 
+  const clearGChord = useCallback(() => {
+    gChordActive.current = false;
+    if (gChordTimer.current) {
+      clearTimeout(gChordTimer.current);
+      gChordTimer.current = null;
+    }
+  }, []);
+
+  const armGChord = useCallback(() => {
+    gChordActive.current = true;
+    if (gChordTimer.current) clearTimeout(gChordTimer.current);
+    gChordTimer.current = setTimeout(clearGChord, G_CHORD_MS);
+  }, [clearGChord]);
+
   const triggerEmergencyStop = useCallback(() => {
     try {
       const socket = getSocket();
       if (socket.connected) {
         socket.emit("robot_command", { action: "emergency_stop", robotId: null });
-        toast.error("⛔ Emergency Stop sent — all robots halted", {
+        toast.error("⛔ Emergency Stop sent — robot halted", {
           duration: 5000,
           id: "emergency-stop",
         });
@@ -81,11 +92,47 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
     (e: KeyboardEvent) => {
       if (disabled || isTyping()) return;
 
+      // G-chord second key (G then D / L / …)
+      if (gChordActive.current) {
+        clearGChord();
+        switch (e.code) {
+          case "KeyD":
+            e.preventDefault();
+            router.push("/");
+            return;
+          case "KeyL":
+            e.preventDefault();
+            router.push("/deliveries");
+            return;
+          default:
+            return;
+        }
+      }
+
+      // Ctrl/Cmd+B — toggle sidebar
+      if (e.code === "KeyB" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        toggleSidebarCollapsed();
+        return;
+      }
+
+      // G — arm go-to chord
+      if (
+        e.code === "KeyG" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault();
+        armGChord();
+        return;
+      }
+
       switch (e.code) {
         case "Space": {
           e.preventDefault();
           if (spaceConfirmed.current) return;
-          // Show pending toast immediately
           toast.loading("Hold Space to confirm Emergency Stop…", {
             id: "space-hold",
             duration: 1000,
@@ -130,9 +177,9 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
 
         case "Slash": {
           if (e.shiftKey) {
-            e.preventDefault(); // "?"
+            e.preventDefault();
             const lines = SHORTCUT_HELP.map(
-              (s) => `${s.key.padEnd(8)} → ${s.action}`
+              (s) => `${s.key.padEnd(14)} → ${s.action}`,
             ).join("  |  ");
             toast.info(`Keyboard shortcuts: ${lines}`, {
               duration: 8000,
@@ -143,6 +190,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
         }
 
         case "Escape":
+          clearGChord();
           onEscape?.();
           break;
 
@@ -150,7 +198,16 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
           break;
       }
     },
-    [disabled, isTyping, triggerEmergencyStop, router, onToggleVoice, onEscape]
+    [
+      disabled,
+      isTyping,
+      clearGChord,
+      armGChord,
+      triggerEmergencyStop,
+      router,
+      onToggleVoice,
+      onEscape,
+    ],
   );
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
@@ -173,6 +230,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions = {}) {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       if (spaceHoldTimer.current) clearTimeout(spaceHoldTimer.current);
+      if (gChordTimer.current) clearTimeout(gChordTimer.current);
     };
   }, [handleKeyDown, handleKeyUp]);
 

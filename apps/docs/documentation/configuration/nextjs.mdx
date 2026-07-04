@@ -107,7 +107,7 @@ As FastAPI exposes an OpenAPI schema, you can generate a fully-typed TypeScript 
     ```JSON
     "scripts": {
       ...
-      "generate-client": "openapi --input https://next-fast-turbo.vercel.app/openapi.json --output ./lib/api/client --client axios --useOptions --useUnionTypes",
+      "generate-client": "openapi --input http://127.0.0.1:8000/openapi.json --output ./lib/api/client --client axios --useOptions --useUnionTypes",
       "generate-client:dev": "openapi --input http://127.0.0.0:8000/openapi.json --output ./lib/api/client --client axios --useOptions --useUnionTypes"
       ...
     },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -30,6 +31,7 @@ import {
 import {
   fetchPhotos,
   deletePhoto as apiDeletePhoto,
+  photoAssetUrl,
   type PhotoResponse,
   type PhotoType,
   type FetchPhotosParams,
@@ -96,11 +98,17 @@ function PhotoCard({
       className="group cursor-pointer overflow-hidden transition-all hover:ring-2 hover:ring-primary/40"
       onClick={() => onSelect(photo)}
     >
-      {/* Thumbnail placeholder */}
+      {/* Thumbnail */}
       <div className="relative aspect-video w-full overflow-hidden bg-gradient-to-br from-muted/50 to-muted">
-        <div className="flex h-full items-center justify-center">
-          <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
-        </div>
+        <Image
+          src={photoAssetUrl(photo.thumbnail_url || photo.url)}
+          alt={photo.caption ?? photo.filename}
+          fill
+          unoptimized
+          sizes="(max-width: 768px) 100vw, 33vw"
+          className="object-cover"
+          loading="lazy"
+        />
 
         {/* Overlay badges */}
         <div className="absolute left-2 top-2">
@@ -168,11 +176,16 @@ function PhotoZoomModal({
           <X className="h-4 w-4" />
         </Button>
 
-        {/* Image placeholder */}
+        {/* Image */}
         <div className="relative aspect-video w-full bg-gradient-to-br from-muted/50 to-muted">
-          <div className="flex h-full items-center justify-center">
-            <ImageIcon className="h-16 w-16 text-muted-foreground/30" />
-          </div>
+          <Image
+            src={photoAssetUrl(photo.url)}
+            alt={photo.caption ?? photo.filename}
+            fill
+            unoptimized
+            sizes="(max-width: 768px) 100vw, 768px"
+            className="object-contain"
+          />
           <div className="absolute left-3 top-3">
             <Badge variant={config.variant}>{config.label}</Badge>
           </div>
@@ -230,9 +243,11 @@ function PhotoZoomModal({
 
           {/* Action buttons */}
           <div className="flex gap-2 pt-1">
-            <Button variant="outline" size="sm" disabled>
+            <Button variant="outline" size="sm" asChild>
+              <a href={photoAssetUrl(photo.url)} download={photo.filename}>
               <Download className="mr-2 h-4 w-4" />
               Download
+              </a>
             </Button>
             <Button
               variant="destructive"

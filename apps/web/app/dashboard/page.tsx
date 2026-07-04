@@ -7,7 +7,6 @@ import {
   RobotStatusCard,
   LocationMap,
   EmergencyStopButton,
-  DashboardError,
   SystemHealth,
 } from "@/components/dashboard";
 import { BatteryGaugeCircular } from "@/components/dashboard/battery-gauge";
@@ -40,10 +39,6 @@ export default function DashboardPage() {
   const selectedRobot = robots.find((r) => r.id === selectedRobotId) ?? null;
 
   // Derived stats
-  const activeCount = robots.filter((r) =>
-    ["delivering", "climbing", "descending", "returning"].includes(r.status),
-  ).length;
-  const chargingCount = robots.filter((r) => r.status === "charging").length;
   const totalDeliveries = robots.reduce((s, r) => s + r.total_deliveries, 0);
   const totalStairs = robots.reduce((s, r) => s + r.stairs_climbed, 0);
 
@@ -57,7 +52,7 @@ export default function DashboardPage() {
       <PageHeader
         icon={Bot}
         title="Robot Status Dashboard"
-        description={`Real-time telemetry via Socket.IO${robots.length > 0 ? ` · ${robots.length} robot${robots.length !== 1 ? "s" : ""}` : ""}${tickCount > 0 ? ` · tick #${tickCount}` : ""}`}
+        description={`Real-time telemetry via Socket.IO${tickCount > 0 ? ` · tick #${tickCount}` : ""}`}
         actions={
           <span className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-medium backdrop-blur-sm">
             {isConnected ? (
@@ -80,10 +75,10 @@ export default function DashboardPage() {
 
       {/* Quick Stats */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <QuickStat icon={Bot} label="Active" value={`${activeCount}/${robots.length}`} sub={`${chargingCount} charging`} />
+        <QuickStat icon={Bot} label="Status" value={robots[0]?.status ?? "offline"} sub={robots[0]?.name ?? "StairBot"} />
         <QuickStat icon={Package} label="Deliveries" value={totalDeliveries.toLocaleString()} sub="All-time total" />
-        <QuickStat icon={ArrowUpDown} label="Stairs Today" value={totalStairs.toLocaleString()} sub="Flights climbed" />
-        <QuickStat icon={Activity} label="Avg Battery" value={`${robots.length ? Math.round(robots.reduce((s, r) => s + r.battery.level, 0) / robots.length) : 0}%`} sub="Fleet average" />
+        <QuickStat icon={ArrowUpDown} label="Stairs" value={totalStairs.toLocaleString()} sub="Flights climbed" />
+        <QuickStat icon={Activity} label="Battery" value={`${robots[0]?.battery.level ?? 0}%`} sub={robots[0]?.battery.is_charging ? "Charging" : "Level"} />
       </div>
 
       {/* Main content */}
@@ -91,7 +86,7 @@ export default function DashboardPage() {
         {/* Robot Status Cards */}
         <div className="lg:col-span-3 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Bot className="h-5 w-5" /> Robot Fleet
+            <Bot className="h-5 w-5" /> Robot Status
             {isConnected && (
               <Zap className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
             )}

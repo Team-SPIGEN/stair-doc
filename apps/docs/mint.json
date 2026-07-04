@@ -20,7 +20,7 @@
   },
   "topbarCtaButton": {
     "name": "Dashboard",
-    "url": "https://next-fast-turbo.vercel.app/"
+    "url": "http://localhost:3000/"
   },
   "tabs": [
     {
@@ -106,6 +106,6 @@
     "thumbsRating": true
   },
   "footerSocials": {
-    "github": "https://github.com/cording12/next-fast-turbo"
+    "github": "https://github.com/your-org/stair-doc"
   }
 }

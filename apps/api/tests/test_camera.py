@@ -33,7 +33,7 @@ async def test_list_photos_default():
 
     data = body["data"]
     assert isinstance(data["photos"], list)
-    assert data["total"] >= 1
+    assert data["total"] == 0
     assert data["page"] == 1
     assert data["page_size"] == 20
 
@@ -90,7 +90,7 @@ async def test_list_photos_timestamp_filter():
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert data["total"] >= 1
+    assert data["total"] == 0
 
 
 # ── GET /api/v1/camera/photos/{photo_id} ─────────────────────────────────
@@ -98,17 +98,29 @@ async def test_list_photos_timestamp_filter():
 
 @pytest.mark.anyio
 async def test_get_photo_by_id():
-    """Fetching a known seeded photo returns correct data."""
+    """Fetching an uploaded photo returns correct data."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get("/api/v1/camera/photos/photo-001")
+        upload_resp = await ac.post(
+            "/api/v1/camera/upload",
+            data={
+                "robot_id": "robot-001",
+                "photo_type": "delivery_proof",
+                "camera_source": "front",
+                "caption": "Test photo",
+            },
+            files={"file": ("test.jpg", b"fake-jpeg-bytes", "image/jpeg")},
+        )
+        assert upload_resp.status_code == 201
+        photo_id = upload_resp.json()["data"]["id"]
+        resp = await ac.get(f"/api/v1/camera/photos/{photo_id}")
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is True
 
     data = body["data"]
-    assert data["id"] == "photo-001"
+    assert data["id"] == photo_id
     assert data["robot_id"] == "robot-001"
     assert data["photo_type"] == "delivery_proof"
     assert "url" in data
@@ -136,7 +148,7 @@ async def test_upload_photo():
         resp = await ac.post(
             "/api/v1/camera/upload",
             data={
-                "robot_id": "robot-002",
+                "robot_id": "robot-001",
                 "photo_type": "delivery_proof",
                 "camera_source": "front",
                 "caption": "Test upload from pytest",
@@ -149,7 +161,7 @@ async def test_upload_photo():
     assert body["success"] is True
 
     data = body["data"]
-    assert data["robot_id"] == "robot-002"
+    assert data["robot_id"] == "robot-001"
     assert data["photo_type"] == "delivery_proof"
     assert data["camera_source"] == "front"
     assert data["caption"] == "Test upload from pytest"
@@ -167,7 +179,7 @@ async def test_upload_then_appears_in_gallery():
         upload_resp = await ac.post(
             "/api/v1/camera/upload",
             data={
-                "robot_id": "robot-003",
+                "robot_id": "robot-001",
                 "photo_type": "snapshot",
                 "camera_source": "rear",
                 "caption": "Gallery flow test",
@@ -220,7 +232,7 @@ async def test_get_stream_by_robot():
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["robot_id"] == "robot-001"
-    assert data["stream_active"] is True
+    assert data["stream_active"] is False
     assert data["resolution"] == "1280x720"
 
 
@@ -283,13 +295,12 @@ async def test_delete_photo_not_found():
 
 @pytest.mark.anyio
 async def test_mjpeg_stream_proxy():
-    """MJPEG stream proxy returns multipart response for active robot."""
+    """MJPEG stream proxy returns 404 until the camera stream is active."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.get("/api/v1/camera/stream.mjpg?robot_id=robot-001")
 
-    assert resp.status_code == 200
-    assert "multipart/x-mixed-replace" in resp.headers.get("content-type", "")
+    assert resp.status_code == 404
 
 
 @pytest.mark.anyio
@@ -297,7 +308,7 @@ async def test_mjpeg_stream_proxy_inactive_robot():
     """MJPEG stream proxy returns 404 for inactive robot."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get("/api/v1/camera/stream.mjpg?robot_id=robot-003")
+        resp = await ac.get("/api/v1/camera/stream.mjpg?robot_id=robot-unknown")
 
     assert resp.status_code == 404
 

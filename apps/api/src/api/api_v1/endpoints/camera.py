@@ -1,8 +1,7 @@
 """Camera feed endpoints for Stair-Doc.
 
-Provides image upload (simulated), photo gallery listing with timestamp-based
-filtering, individual photo retrieval, and camera stream info — all with
-mock in-memory storage.
+Provides image upload, photo gallery listing with timestamp-based filtering,
+individual photo retrieval, and camera stream info.
 """
 
 import uuid
@@ -10,8 +9,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
+from src.core.socket import broadcast_new_photo
+from src.core.storage import delete_photo as storage_delete_photo
+from src.core.storage import get_photo as storage_get_photo
+from src.core.storage import get_photo_file, list_photos as storage_list_photos
+from src.core.storage import save_photo
 from src.schemas.base import ApiResponse, success_response
 from src.schemas.camera import (
     CameraSource,
@@ -21,158 +25,24 @@ from src.schemas.camera import (
     PhotoType,
     PhotoUploadMeta,
 )
-from src.core.socket import broadcast_new_photo
 
 router = APIRouter(prefix="/camera", tags=["camera"])
 
-# ── Mock In-Memory Store ─────────────────────────────────────────────────
+# ── Backward-compatible In-Memory Store ──────────────────────────────────
 
-_photos: list[PhotoResponse] = [
-    PhotoResponse(
-        id="photo-001",
-        robot_id="robot-001",
-        delivery_id="del-001",
-        photo_type=PhotoType.DELIVERY_PROOF,
-        camera_source=CameraSource.FRONT,
-        caption="Package delivered to Room 305",
-        filename="delivery_proof_001.jpg",
-        url="/api/v1/camera/photos/photo-001/image",
-        thumbnail_url="/api/v1/camera/photos/photo-001/thumbnail",
-        width=1280,
-        height=720,
-        size_bytes=245_760,
-        robot_floor=3,
-        recipient_rfid="RFID-A1B2C3",
-        captured_at=datetime.now(UTC) - timedelta(hours=1),
-        uploaded_at=datetime.now(UTC) - timedelta(hours=1),
-    ),
-    PhotoResponse(
-        id="photo-002",
-        robot_id="robot-002",
-        delivery_id="del-002",
-        photo_type=PhotoType.RECIPIENT_VERIFY,
-        camera_source=CameraSource.FRONT,
-        caption="Recipient verification — Bob Smith",
-        filename="recipient_verify_002.jpg",
-        url="/api/v1/camera/photos/photo-002/image",
-        thumbnail_url="/api/v1/camera/photos/photo-002/thumbnail",
-        width=640,
-        height=480,
-        size_bytes=102_400,
-        robot_floor=2,
-        recipient_rfid="RFID-D4E5F6",
-        captured_at=datetime.now(UTC) - timedelta(hours=3),
-        uploaded_at=datetime.now(UTC) - timedelta(hours=3),
-    ),
-    PhotoResponse(
-        id="photo-003",
-        robot_id="robot-001",
-        delivery_id=None,
-        photo_type=PhotoType.OBSTACLE,
-        camera_source=CameraSource.FRONT,
-        caption="Obstacle detected on floor 2 hallway",
-        filename="obstacle_003.jpg",
-        url="/api/v1/camera/photos/photo-003/image",
-        thumbnail_url="/api/v1/camera/photos/photo-003/thumbnail",
-        width=1280,
-        height=720,
-        size_bytes=198_000,
-        captured_at=datetime.now(UTC) - timedelta(hours=5),
-        uploaded_at=datetime.now(UTC) - timedelta(hours=5),
-    ),
-    PhotoResponse(
-        id="photo-004",
-        robot_id="robot-003",
-        delivery_id=None,
-        photo_type=PhotoType.SNAPSHOT,
-        camera_source=CameraSource.FRONT,
-        caption="Charging dock environment check",
-        filename="snapshot_004.jpg",
-        url="/api/v1/camera/photos/photo-004/image",
-        thumbnail_url="/api/v1/camera/photos/photo-004/thumbnail",
-        width=1920,
-        height=1080,
-        size_bytes=512_000,
-        captured_at=datetime.now(UTC) - timedelta(hours=8),
-        uploaded_at=datetime.now(UTC) - timedelta(hours=8),
-    ),
-    PhotoResponse(
-        id="photo-005",
-        robot_id="robot-004",
-        delivery_id="del-004",
-        photo_type=PhotoType.DELIVERY_PROOF,
-        camera_source=CameraSource.FRONT,
-        caption="Delivery completed — Building C, Room 207",
-        filename="delivery_proof_005.jpg",
-        url="/api/v1/camera/photos/photo-005/image",
-        thumbnail_url="/api/v1/camera/photos/photo-005/thumbnail",
-        width=1280,
-        height=720,
-        size_bytes=230_400,
-        robot_floor=2,
-        recipient_rfid="RFID-G7H8I9",
-        captured_at=datetime.now(UTC) - timedelta(hours=12),
-        uploaded_at=datetime.now(UTC) - timedelta(hours=12),
-    ),
-    PhotoResponse(
-        id="photo-006",
-        robot_id="robot-002",
-        delivery_id=None,
-        photo_type=PhotoType.ENVIRONMENT,
-        camera_source=CameraSource.REAR,
-        caption="Stairwell B — floor 3 landing",
-        filename="environment_006.jpg",
-        url="/api/v1/camera/photos/photo-006/image",
-        thumbnail_url="/api/v1/camera/photos/photo-006/thumbnail",
-        width=1280,
-        height=720,
-        size_bytes=275_000,
-        captured_at=datetime.now(UTC) - timedelta(days=1),
-        uploaded_at=datetime.now(UTC) - timedelta(days=1),
-    ),
-]
+_photos: list[PhotoResponse] = []
 
-# Camera stream info per robot
+# Camera stream info for the single robot
 _stream_info: dict[str, CameraStreamInfo] = {
     "robot-001": CameraStreamInfo(
         robot_id="robot-001",
-        robot_name="StairBot Alpha",
-        stream_active=True,
-        stream_url="/api/v1/camera/stream/robot-001",
-        fps=15,
-        resolution="1280x720",
-        camera_source=CameraSource.FRONT,
-        last_frame_at=datetime.now(UTC) - timedelta(seconds=2),
-    ),
-    "robot-002": CameraStreamInfo(
-        robot_id="robot-002",
-        robot_name="StairBot Beta",
-        stream_active=True,
-        stream_url="/api/v1/camera/stream/robot-002",
-        fps=15,
-        resolution="1280x720",
-        camera_source=CameraSource.FRONT,
-        last_frame_at=datetime.now(UTC) - timedelta(seconds=2),
-    ),
-    "robot-003": CameraStreamInfo(
-        robot_id="robot-003",
-        robot_name="StairBot Gamma",
+        robot_name="StairBot",
         stream_active=False,
-        stream_url=None,
+        stream_url="/api/v1/camera/stream/robot-001",
         fps=0,
-        resolution="640x480",
+        resolution="1280x720",
         camera_source=CameraSource.FRONT,
-        last_frame_at=datetime.now(UTC) - timedelta(minutes=30),
-    ),
-    "robot-004": CameraStreamInfo(
-        robot_id="robot-004",
-        robot_name="StairBot Delta",
-        stream_active=True,
-        stream_url="/api/v1/camera/stream/robot-004",
-        fps=10,
-        resolution="640x480",
-        camera_source=CameraSource.FRONT,
-        last_frame_at=datetime.now(UTC) - timedelta(seconds=5),
+        last_frame_at=None,
     ),
 }
 
@@ -187,8 +57,8 @@ _stream_info: dict[str, CameraStreamInfo] = {
     summary="Upload a camera image",
     description=(
         "Upload an image captured by a robot camera. Accepts multipart form "
-        "data with the image file and metadata. In this mock implementation the "
-        "file contents are discarded but metadata is stored."
+        "data with the image file and metadata. The image bytes are persisted "
+        "and returned by the gallery image endpoints."
     ),
 )
 async def upload_photo(
@@ -201,13 +71,13 @@ async def upload_photo(
     recipient_rfid: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ) -> dict:
-    # Read file size (mock — we don't persist the bytes)
     contents = await file.read()
     size_bytes = len(contents)
 
     now = datetime.now(UTC)
     photo_id = f"photo-{uuid.uuid4().hex[:8]}"
     filename = file.filename or f"{photo_type.value}_{photo_id}.jpg"
+    content_type = file.content_type or "application/octet-stream"
 
     photo = PhotoResponse(
         id=photo_id,
@@ -227,7 +97,7 @@ async def upload_photo(
         captured_at=now,
         uploaded_at=now,
     )
-    _photos.insert(0, photo)
+    save_photo(photo.model_dump(mode="json"), contents, content_type)
 
     # Broadcast to all connected Socket.IO clients for live gallery refresh
     try:
@@ -238,6 +108,36 @@ async def upload_photo(
     return success_response(
         data=photo.model_dump(mode="json"),
         message=f"Photo '{filename}' uploaded successfully",
+    )
+
+
+@router.post(
+    "/photos",
+    response_model=ApiResponse[PhotoResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a camera image",
+    include_in_schema=False,
+)
+async def upload_photo_alias(
+    robot_id: str = Form(...),
+    photo_type: PhotoType = Form(PhotoType.SNAPSHOT),
+    camera_source: CameraSource = Form(CameraSource.FRONT),
+    delivery_id: Optional[str] = Form(None),
+    caption: Optional[str] = Form(None),
+    robot_floor: Optional[int] = Form(None),
+    recipient_rfid: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+) -> dict:
+    """Upload alias used by older Pi bridge code."""
+    return await upload_photo(
+        robot_id=robot_id,
+        photo_type=photo_type,
+        camera_source=camera_source,
+        delivery_id=delivery_id,
+        caption=caption,
+        robot_floor=robot_floor,
+        recipient_rfid=recipient_rfid,
+        file=file,
     )
 
 
@@ -262,7 +162,7 @@ async def list_photos(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ) -> dict:
-    results = list(_photos)
+    results = [PhotoResponse(**p) for p in storage_list_photos()]
 
     # ── Filters ──
     if robot_id is not None:
@@ -306,7 +206,8 @@ async def list_photos(
     description="Retrieve metadata for a specific photo by ID.",
 )
 async def get_photo(photo_id: str) -> dict:
-    photo = next((p for p in _photos if p.id == photo_id), None)
+    raw = storage_get_photo(photo_id)
+    photo = PhotoResponse(**raw) if raw else None
     if photo is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -316,6 +217,31 @@ async def get_photo(photo_id: str) -> dict:
         data=photo.model_dump(mode="json"),
         message="Photo retrieved successfully",
     )
+
+
+@router.get(
+    "/photos/{photo_id}/image",
+    summary="Get photo image bytes",
+    description="Return the uploaded image file for a photo.",
+)
+async def get_photo_image(photo_id: str) -> FileResponse:
+    photo_file = get_photo_file(photo_id)
+    if photo_file is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Image for photo '{photo_id}' not found",
+        )
+    path, content_type = photo_file
+    return FileResponse(path, media_type=content_type)
+
+
+@router.get(
+    "/photos/{photo_id}/thumbnail",
+    summary="Get photo thumbnail",
+    description="Return the uploaded image as a thumbnail for the prototype.",
+)
+async def get_photo_thumbnail(photo_id: str) -> FileResponse:
+    return await get_photo_image(photo_id)
 
 
 @router.get(
@@ -361,13 +287,11 @@ async def get_stream_info(robot_id: str) -> dict:
     ),
 )
 async def delete_photo(photo_id: str) -> dict:
-    photo = next((p for p in _photos if p.id == photo_id), None)
-    if photo is None:
+    if not storage_delete_photo(photo_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Photo '{photo_id}' not found",
         )
-    _photos.remove(photo)
     return success_response(
         data={"id": photo_id, "deleted": True},
         message=f"Photo '{photo_id}' deleted successfully",

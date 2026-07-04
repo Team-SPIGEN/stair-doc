@@ -32,7 +32,7 @@ async def test_list_deliveries():
     # Inner data
     data = body["data"]
     assert "deliveries" in data
-    assert data["total"] >= 5  # seeded data
+    assert data["total"] == 0
     assert "timestamp" in data
 
 
@@ -112,17 +112,31 @@ async def test_create_delivery_appears_in_list():
         assert new_id in ids
 
 
+async def _create_delivery(ac: AsyncClient) -> str:
+    payload = {
+        "pickup_location": {"floor": 1, "building": "Building A", "room": "101"},
+        "dropoff_location": {"floor": 3, "building": "Building A", "room": "305"},
+        "package_weight": 2.5,
+        "priority": "urgent",
+        "recipient_name": "Test User",
+    }
+    resp = await ac.post("/api/v1/deliveries", json=payload)
+    assert resp.status_code == 201
+    return resp.json()["data"]["id"]
+
+
 @pytest.mark.anyio
 async def test_get_single_delivery():
     """GET /api/v1/deliveries/{id} returns the correct delivery in envelope."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.get("/api/v1/deliveries/del-001")
+        delivery_id = await _create_delivery(ac)
+        resp = await ac.get(f"/api/v1/deliveries/{delivery_id}")
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is True
-    assert body["data"]["id"] == "del-001"
+    assert body["data"]["id"] == delivery_id
 
 
 @pytest.mark.anyio
@@ -158,8 +172,9 @@ async def test_update_delivery_status():
     """PATCH /api/v1/deliveries/{id} updates the status."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        delivery_id = await _create_delivery(ac)
         resp = await ac.patch(
-            "/api/v1/deliveries/del-003",
+            f"/api/v1/deliveries/{delivery_id}",
             json={"status": "assigned"},
         )
 
@@ -167,7 +182,7 @@ async def test_update_delivery_status():
     body = resp.json()
     assert body["success"] is True
     assert body["data"]["status"] == "assigned"
-    assert body["data"]["id"] == "del-003"
+    assert body["data"]["id"] == delivery_id
 
 
 @pytest.mark.anyio
@@ -175,8 +190,9 @@ async def test_update_delivery_multiple_fields():
     """PATCH /api/v1/deliveries/{id} can update multiple fields at once."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        delivery_id = await _create_delivery(ac)
         resp = await ac.patch(
-            "/api/v1/deliveries/del-001",
+            f"/api/v1/deliveries/{delivery_id}",
             json={"priority": "express", "notes": "Updated note"},
         )
 
@@ -204,7 +220,8 @@ async def test_update_delivery_no_fields():
     """PATCH with empty body returns 400."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        resp = await ac.patch("/api/v1/deliveries/del-001", json={})
+        delivery_id = await _create_delivery(ac)
+        resp = await ac.patch(f"/api/v1/deliveries/{delivery_id}", json={})
 
     assert resp.status_code == 400
 

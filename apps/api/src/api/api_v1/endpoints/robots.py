@@ -1,14 +1,12 @@
-"""Robot status endpoints for Stair-Doc delivery robots.
+"""Robot status endpoints for Stair-Doc delivery robots."""
 
-Provides real-time robot status including battery, location, lock status,
-and sensor readings. Uses mock data for development.
-"""
-
-import random
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 
+from src.core.bridge import get_bridge_status, is_bridge_connected
+from src.core.robot import ROBOT_ID
+from src.core.robot_state import get_robot, get_robots
 from src.schemas.base import ApiResponse, success_response
 from src.schemas.robot import (
     BatteryResponse,
@@ -22,130 +20,38 @@ from src.schemas.robot import (
 
 router = APIRouter(prefix="/robot", tags=["robot"])
 
-# ── Mock Data ────────────────────────────────────────────────────────────
-# Replace with database queries when PostgreSQL is connected
-
-MOCK_ROBOTS: list[dict] = [
-    {
-        "id": "robot-001",
-        "name": "StairBot Alpha",
-        "serial_number": "SB-001-2024",
-        "status": RobotStatus.DELIVERING,
-        "lock_status": LockStatus.LOCKED,
-        "location": LocationResponse(
-            floor=3, building="Building A", room="305",
-            x=65.0, y=40.0,
-        ),
-        "battery": BatteryResponse(
-            level=78, is_charging=False, voltage=25.6,
-            temperature=32.0, estimated_minutes_remaining=156,
-        ),
-        "sensors": SensorsResponse(
-            obstacle_detected=False, stair_detected=False,
-            distance_to_obstacle=3.2, incline_angle=0.0, weight_kg=2.5,
-        ),
-        "speed": 1.2,
-        "stairs_climbed": 156,
-        "total_deliveries": 342,
-        "current_delivery_id": "del-123",
-        "uptime_seconds": 28800,
-    },
-    {
-        "id": "robot-002",
-        "name": "StairBot Beta",
-        "serial_number": "SB-002-2024",
-        "status": RobotStatus.CLIMBING,
-        "lock_status": LockStatus.LOCKED,
-        "location": LocationResponse(
-            floor=2, building="Building B", room=None,
-            x=30.0, y=70.0,
-        ),
-        "battery": BatteryResponse(
-            level=45, is_charging=False, voltage=23.8,
-            temperature=38.0, estimated_minutes_remaining=72,
-        ),
-        "sensors": SensorsResponse(
-            obstacle_detected=False, stair_detected=True,
-            distance_to_obstacle=None, incline_angle=35.0, weight_kg=1.8,
-        ),
-        "speed": 0.8,
-        "stairs_climbed": 89,
-        "total_deliveries": 287,
-        "current_delivery_id": "del-124",
-        "uptime_seconds": 21600,
-    },
-    {
-        "id": "robot-003",
-        "name": "StairBot Gamma",
-        "serial_number": "SB-003-2024",
-        "status": RobotStatus.CHARGING,
-        "lock_status": LockStatus.LOCKED,
-        "location": LocationResponse(
-            floor=1, building="Building A", room="Dock-1",
-            x=10.0, y=90.0,
-        ),
-        "battery": BatteryResponse(
-            level=23, is_charging=True, voltage=26.2,
-            temperature=28.0, estimated_minutes_remaining=45,
-        ),
-        "sensors": SensorsResponse(
-            obstacle_detected=False, stair_detected=False,
-            distance_to_obstacle=None, incline_angle=0.0, weight_kg=0.0,
-        ),
-        "speed": 0.0,
-        "stairs_climbed": 201,
-        "total_deliveries": 456,
-        "current_delivery_id": None,
-        "uptime_seconds": 14400,
-    },
-    {
-        "id": "robot-004",
-        "name": "StairBot Delta",
-        "serial_number": "SB-004-2024",
-        "status": RobotStatus.IDLE,
-        "lock_status": LockStatus.UNLOCKED,
-        "location": LocationResponse(
-            floor=1, building="Building C", room="Lobby",
-            x=50.0, y=20.0,
-        ),
-        "battery": BatteryResponse(
-            level=92, is_charging=False, voltage=25.9,
-            temperature=26.0, estimated_minutes_remaining=210,
-        ),
-        "sensors": SensorsResponse(
-            obstacle_detected=False, stair_detected=False,
-            distance_to_obstacle=5.0, incline_angle=0.0, weight_kg=0.0,
-        ),
-        "speed": 0.0,
-        "stairs_climbed": 178,
-        "total_deliveries": 389,
-        "current_delivery_id": None,
-        "uptime_seconds": 36000,
-    },
-]
-
 
 def _build_robot_response(robot_data: dict) -> RobotStatusResponse:
-    """Build a RobotStatusResponse with live-ish battery jitter."""
-    battery: BatteryResponse = robot_data["battery"]
-    jitter = random.randint(-2, 2)
-    adjusted_level = max(0, min(100, battery.level + jitter))
-
     return RobotStatusResponse(
         id=robot_data["id"],
         name=robot_data["name"],
         serial_number=robot_data["serial_number"],
         status=robot_data["status"],
         lock_status=robot_data["lock_status"],
-        location=robot_data["location"],
-        battery=BatteryResponse(
-            level=adjusted_level,
-            is_charging=battery.is_charging,
-            voltage=battery.voltage + random.uniform(-0.2, 0.2),
-            temperature=battery.temperature + random.uniform(-1.0, 1.0),
-            estimated_minutes_remaining=battery.estimated_minutes_remaining,
+        location=LocationResponse(
+            floor=robot_data["floor"],
+            building=robot_data["building"],
+            room=robot_data["room"],
+            x=robot_data["x"],
+            y=robot_data["y"],
         ),
-        sensors=robot_data["sensors"],
+        battery=BatteryResponse(
+            level=robot_data["battery_level"],
+            is_charging=robot_data["is_charging"],
+            voltage=robot_data["voltage"],
+            temperature=robot_data["temperature"],
+            estimated_minutes_remaining=robot_data["estimated_minutes"],
+        ),
+        sensors=SensorsResponse(
+            obstacle_detected=robot_data["obstacle_detected"],
+            stair_detected=robot_data["stair_detected"],
+            distance_to_obstacle=robot_data["distance_to_obstacle"],
+            incline_angle=robot_data["incline_angle"],
+            weight_kg=robot_data["weight_kg"],
+            esp32_connected=robot_data.get("esp32_connected", False),
+            esp32_port=robot_data.get("esp32_port"),
+            esp32_connection=robot_data.get("esp32_connection"),
+        ),
         speed=robot_data["speed"],
         stairs_climbed=robot_data["stairs_climbed"],
         total_deliveries=robot_data["total_deliveries"],
@@ -155,40 +61,52 @@ def _build_robot_response(robot_data: dict) -> RobotStatusResponse:
     )
 
 
-# ── Endpoints ────────────────────────────────────────────────────────────
-
-
 @router.get(
     "/status",
     response_model=ApiResponse[RobotStatusListResponse],
-    summary="Get all robot statuses",
-    description="Returns the current status of all Stair-Doc delivery robots "
-    "including battery levels, locations, lock status, and sensor readings.",
+    summary="Get robot status",
+    description="Returns the current status of the Stair-Doc robot.",
 )
 async def get_all_robot_status() -> dict:
-    robots = [_build_robot_response(r) for r in MOCK_ROBOTS]
+    robots = [_build_robot_response(r) for r in get_robots()]
     data = RobotStatusListResponse(
         robots=robots,
         total=len(robots),
         timestamp=datetime.now(UTC),
     )
-    return success_response(data, f"Retrieved {len(robots)} robots")
+    return success_response(data, "Robot status retrieved successfully")
 
 
 @router.get(
     "/status/{robot_id}",
     response_model=ApiResponse[RobotStatusResponse],
-    summary="Get single robot status",
-    description="Returns the current status of a specific robot by ID.",
+    summary="Get robot status by ID",
+    description="Returns the current status of the robot.",
 )
 async def get_robot_status(robot_id: str) -> dict:
-    robot_data = next((r for r in MOCK_ROBOTS if r["id"] == robot_id), None)
-    if not robot_data:
+    if robot_id != ROBOT_ID:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Robot with id '{robot_id}' not found",
         )
     return success_response(
-        _build_robot_response(robot_data),
+        _build_robot_response(get_robot()),
         "Robot status retrieved successfully",
+    )
+
+
+@router.get(
+    "/bridge/status",
+    summary="Get hardware bridge connection status",
+    description=(
+        "Returns whether the Raspberry Pi bridge is connected "
+        "via Socket.IO for ESP32 telemetry and command forwarding."
+    ),
+)
+async def get_bridge_connection_status() -> dict:
+    status_payload = get_bridge_status()
+    status_payload["robot_001_live"] = is_bridge_connected(ROBOT_ID)
+    return success_response(
+        status_payload,
+        f"{status_payload['connected_count']} bridge(s) connected",
     )

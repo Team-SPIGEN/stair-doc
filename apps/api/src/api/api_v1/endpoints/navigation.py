@@ -4,11 +4,16 @@ Provides manual joystick commands, autonomous navigation,
 and navigation status — all with mock in-memory state.
 """
 
-import random
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
+
+from src.core.bridge import build_bridge_command_payload, get_bridge_sid
+from src.core.robot import ROBOT_ID
+from src.core.robot_state import get_robot
+from src.core.socket import sio
 
 from src.schemas.base import ApiResponse, success_response
 from src.schemas.navigation import (
@@ -35,49 +40,51 @@ _nav_state: dict[str, dict] = {
         "current_speed": 0.0,
         "emergency_active": False,
     },
-    "robot-002": {
-        "mode": NavigationMode.IDLE,
-        "target_floor": None,
-        "target_location": None,
-        "progress": 0.0,
-        "eta_seconds": None,
-        "current_speed": 0.0,
-        "emergency_active": False,
-    },
-    "robot-003": {
-        "mode": NavigationMode.IDLE,
-        "target_floor": None,
-        "target_location": None,
-        "progress": 0.0,
-        "eta_seconds": None,
-        "current_speed": 0.0,
-        "emergency_active": False,
-    },
-    "robot-004": {
-        "mode": NavigationMode.IDLE,
-        "target_floor": None,
-        "target_location": None,
-        "progress": 0.0,
-        "eta_seconds": None,
-        "current_speed": 0.0,
-        "emergency_active": False,
-    },
 }
 
 
 def _get_nav_state(robot_id: str) -> dict:
-    """Get or create navigation state for a robot."""
-    if robot_id not in _nav_state:
-        _nav_state[robot_id] = {
-            "mode": NavigationMode.IDLE,
-            "target_floor": None,
-            "target_location": None,
-            "progress": 0.0,
-            "eta_seconds": None,
-            "current_speed": 0.0,
-            "emergency_active": False,
-        }
+    """Get navigation state for the single robot."""
+    if robot_id != ROBOT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Robot with id '{robot_id}' not found",
+        )
     return _nav_state[robot_id]
+
+
+def _assert_motor_controller_ready(robot_id: str) -> None:
+    """Reject physical movement when the live bridge has no ESP32 serial link."""
+    if not get_bridge_sid(robot_id):
+        return
+    if get_robot().get("esp32_connected", False):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="ESP32 motor controller is not connected. Check the Pi serial device before moving.",
+    )
+
+
+async def _forward_to_bridge(
+    robot_id: str,
+    action: str,
+    *,
+    speed: float = 0.5,
+    target_floor: int | None = None,
+) -> None:
+    sid = get_bridge_sid(robot_id)
+    if not sid:
+        return
+    await sio.emit(
+        "bridge_command",
+        build_bridge_command_payload(
+            action,
+            robot_id,
+            speed=speed,
+            target_floor=target_floor,
+        ),
+        to=sid,
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -113,6 +120,7 @@ async def send_command(body: ManualCommandRequest) -> dict:
             speed=0.0,
             timestamp=now,
         )
+        await _forward_to_bridge(body.robot_id, body.command.value, speed=0.0)
         return success_response(result, "Emergency stop activated")
 
     if state["emergency_active"]:
@@ -126,6 +134,7 @@ async def send_command(body: ManualCommandRequest) -> dict:
         if state["mode"] == NavigationMode.MANUAL:
             state["mode"] = NavigationMode.IDLE
     else:
+        _assert_motor_controller_ready(body.robot_id)
         state["mode"] = NavigationMode.MANUAL
         state["current_speed"] = body.speed
 
@@ -135,6 +144,11 @@ async def send_command(body: ManualCommandRequest) -> dict:
         robot_id=body.robot_id,
         speed=body.speed if body.command != NavigationCommand.STOP else 0.0,
         timestamp=now,
+    )
+    await _forward_to_bridge(
+        body.robot_id,
+        body.command.value,
+        speed=body.speed if body.command != NavigationCommand.STOP else 0.0,
     )
     return success_response(
         result,
@@ -161,10 +175,10 @@ async def start_autonomous(body: AutonomousRequest) -> dict:
             detail="Emergency stop is active. Reset before navigating.",
         )
 
-    # Simulate ETA: ~30s per floor difference
-    current_floor = random.choice([1, 2, 3])
-    floor_diff = abs(body.target_floor - current_floor)
-    eta_seconds = max(30, floor_diff * 30 + random.randint(10, 60))
+    _assert_motor_controller_ready(body.robot_id)
+
+    floor_diff = abs(body.target_floor - 1)
+    eta_seconds = max(30, floor_diff * 30)
     eta_minutes = eta_seconds // 60
     eta_remaining_seconds = eta_seconds % 60
     eta_display = (
@@ -173,7 +187,7 @@ async def start_autonomous(body: AutonomousRequest) -> dict:
         else f"{eta_seconds}s"
     )
 
-    # Simulate waypoint path
+    current_floor = 1
     path = [
         {"x": 50.0, "y": 20.0, "floor": current_floor, "label": "Start"},
         {"x": 50.0, "y": 50.0, "floor": current_floor, "label": "Corridor"},
@@ -200,6 +214,12 @@ async def start_autonomous(body: AutonomousRequest) -> dict:
     state["progress"] = 0.0
     state["eta_seconds"] = eta_seconds
     state["current_speed"] = 0.7
+    await _forward_to_bridge(
+        body.robot_id,
+        "autonomous",
+        speed=0.7,
+        target_floor=body.target_floor,
+    )
 
     result = AutonomousResponse(
         success=True,
@@ -225,16 +245,6 @@ async def get_nav_status(
 ) -> dict:
     state = _get_nav_state(robot_id)
     now = datetime.now(UTC)
-
-    # Simulate progress increment for autonomous mode
-    if state["mode"] == NavigationMode.AUTONOMOUS:
-        state["progress"] = min(1.0, state["progress"] + random.uniform(0.01, 0.05))
-        if state["eta_seconds"] and state["eta_seconds"] > 0:
-            state["eta_seconds"] = max(0, state["eta_seconds"] - random.randint(1, 5))
-        if state["progress"] >= 1.0:
-            state["mode"] = NavigationMode.IDLE
-            state["current_speed"] = 0.0
-            state["eta_seconds"] = 0
 
     result = NavigationStatusResponse(
         robot_id=robot_id,
@@ -279,4 +289,5 @@ async def reset_emergency_stop(
         speed=0.0,
         timestamp=now,
     )
+    await _forward_to_bridge(robot_id, "stop", speed=0.0)
     return success_response(result, "Emergency stop reset")

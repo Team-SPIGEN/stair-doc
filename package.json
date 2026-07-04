@@ -1,5 +1,5 @@
 {
-  "name": "next-fast-turbo",
+  "name": "stair-doc",
   "private": true,
   "scripts": {
     "dev": "turbo run dev --filter=web --filter=api",

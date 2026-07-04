@@ -64,7 +64,7 @@ def decode_token(token: str) -> Optional[TokenPayload]:
 # Each entry mirrors the DB row a real implementation would have.
 # Passwords are hashed at import time (once).
 
-_HASHED = hash_password("password123")
+_HASHED = hash_password(settings.DEMO_USER_PASSWORD)
 
 MOCK_USERS: dict[str, dict] = {
     "usr_op_001": {

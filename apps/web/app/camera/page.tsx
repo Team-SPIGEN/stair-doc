@@ -27,6 +27,7 @@ import {
   type PhotoType,
   type CameraSource,
 } from "@/lib/api/camera";
+import { ROBOT_ID } from "@/lib/robot";
 import { cn } from "@/lib/utils";
 
 // ── Upload Panel ─────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ function UploadPanel() {
     photo?: PhotoResponse;
     error?: string;
   } | null>(null);
-  const [robotId, setRobotId] = useState("robot-001");
+  const robotId = ROBOT_ID;
   const [photoType, setPhotoType] = useState<PhotoType>("snapshot");
   const [cameraSource, setCameraSource] = useState<CameraSource>("front");
   const [caption, setCaption] = useState("");
@@ -81,25 +82,11 @@ function UploadPanel() {
           Upload Photo
         </CardTitle>
         <CardDescription>
-          Simulate uploading a camera image from a robot
+          Upload a camera image from the robot
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Robot</Label>
-            <Select
-              value={robotId}
-              onChange={(e) => setRobotId(e.target.value)}
-              className="h-8 text-xs"
-            >
-              <option value="robot-001">StairBot Alpha</option>
-              <option value="robot-002">StairBot Beta</option>
-              <option value="robot-003">StairBot Gamma</option>
-              <option value="robot-004">StairBot Delta</option>
-            </Select>
-          </div>
-
           <div className="space-y-1.5">
             <Label className="text-xs">Photo Type</Label>
             <Select

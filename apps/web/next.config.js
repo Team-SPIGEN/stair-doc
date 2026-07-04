@@ -1,3 +1,11 @@
+const isProductionBuild = process.env.NODE_ENV === "production";
+
+if (isProductionBuild && !process.env.NEXT_PUBLIC_API_URL?.trim()) {
+  throw new Error(
+    "NEXT_PUBLIC_API_URL is required for production builds. Set it to the deployed backend URL.",
+  );
+}
+
 /** @type {import('next').NextConfig} */
 const withPWA = require("@ducanh2912/next-pwa").default({
   dest: "public",
@@ -70,6 +78,8 @@ const withPWA = require("@ducanh2912/next-pwa").default({
 const nextConfig = withPWA({
   reactStrictMode: true,
   trailingSlash: true,
+  // PWA plugin injects webpack config; acknowledge Turbopack for `next dev` (PWA is off in dev).
+  turbopack: {},
 });
 
 module.exports = nextConfig;

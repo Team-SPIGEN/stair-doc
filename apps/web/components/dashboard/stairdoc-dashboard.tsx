@@ -11,7 +11,6 @@ import {
   EmergencyStopButton,
   EmergencyStopBanner,
   DashboardLoading,
-  DashboardError,
   ConnectionStatus,
   BatteryGaugeCircular,
 } from "@/components/dashboard";
@@ -30,6 +29,7 @@ import {
 } from "lucide-react";
 import { VoiceControl } from "@/components/voice/voice-control";
 import type { VoiceCommandResponse } from "@/lib/api/voice";
+import { useAuth } from "@/contexts/auth-context";
 
 /** Monotonic counter for unique event IDs. */
 let _seq = 0;
@@ -38,6 +38,7 @@ function nextId(): string {
 }
 
 export function StairDocDashboard() {
+  const { role } = useAuth();
   const [selectedRobotId, setSelectedRobotId] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
 
@@ -88,16 +89,9 @@ export function StairDocDashboard() {
 
   const selectedRobot = robots.find((r) => r.id === selectedRobotId) ?? null;
 
-  // Derive stats from real data
-  const activeCount = robots.filter((r) =>
-    ["delivering", "climbing", "descending", "returning"].includes(r.status),
-  ).length;
-  const chargingCount = robots.filter((r) => r.status === "charging").length;
   const totalDeliveries = robots.reduce((s, r) => s + r.total_deliveries, 0);
   const totalStairs = robots.reduce((s, r) => s + r.stairs_climbed, 0);
-  const avgBattery = robots.length
-    ? Math.round(robots.reduce((s, r) => s + r.battery.level, 0) / robots.length)
-    : 0;
+  const avgBattery = robots[0]?.battery.level ?? 0;
 
   const hasEmergency = robots.some((r) => r.status === "emergency");
 
@@ -123,10 +117,7 @@ export function StairDocDashboard() {
             Stair-Doc Dashboard
           </h1>
           <p className="text-muted-foreground">
-            Real-time monitoring and control for your delivery robot fleet
-            {robots.length > 0 && (
-              <> &middot; {robots.length} robot{robots.length !== 1 ? "s" : ""}</>
-            )}
+            Real-time monitoring and control for your delivery robot
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -142,30 +133,30 @@ export function StairDocDashboard() {
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard
-          title="Active Robots"
-          value={`${activeCount}/${robots.length}`}
-          subtitle={`${chargingCount} charging`}
+          title="Robot Status"
+          value={robots[0]?.status ?? "offline"}
+          subtitle={robots[0]?.name ?? "StairBot"}
           icon={Bot}
           gradient="blue"
         />
         <StatsCard
           title="Total Deliveries"
           value={totalDeliveries.toLocaleString()}
-          subtitle="All-time fleet total"
+          subtitle="All-time total"
           icon={Package}
           gradient="green"
         />
         <StatsCard
           title="Stairs Climbed"
           value={totalStairs.toLocaleString()}
-          subtitle="Fleet total flights"
+          subtitle="Total flights"
           icon={ArrowUpDown}
           gradient="purple"
         />
         <StatsCard
-          title="Avg. Battery"
+          title="Battery"
           value={`${avgBattery}%`}
-          subtitle={`${robots.length} robot${robots.length !== 1 ? "s" : ""} online`}
+          subtitle={robots[0]?.battery.is_charging ? "Charging" : "Current level"}
           icon={Zap}
           gradient="orange"
         />
@@ -173,11 +164,11 @@ export function StairDocDashboard() {
 
       {/* Main Content */}
       <div className="grid gap-6 lg:grid-cols-4">
-        {/* Robot Fleet */}
+        {/* Robot Status */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold flex items-center gap-2">
-              Robot Fleet
+              Robot Status
               {isConnected && (
                 <Zap className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
               )}
@@ -250,7 +241,7 @@ export function StairDocDashboard() {
 
           <VoiceControl
             robotId={selectedRobot?.id ?? "robot-001"}
-            role="operator"
+            role={role ?? "operator"}
             title="Voice Commands"
             onCommand={handleVoiceCommand}
           />
@@ -283,7 +274,7 @@ export function StairDocDashboard() {
             <div>
               <p className="text-2xl font-bold">{avgBattery}%</p>
               <p className="text-sm text-muted-foreground">
-                Fleet Avg Battery
+                Battery
               </p>
             </div>
           </CardContent>
