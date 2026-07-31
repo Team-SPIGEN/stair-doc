@@ -32,15 +32,14 @@ router = APIRouter(prefix="/camera", tags=["camera"])
 
 _photos: list[PhotoResponse] = []
 
-# Camera stream info for the single robot
 _stream_info: dict[str, CameraStreamInfo] = {
     "robot-001": CameraStreamInfo(
         robot_id="robot-001",
         robot_name="StairBot",
-        stream_active=False,
-        stream_url="/api/v1/camera/stream/robot-001",
-        fps=0,
-        resolution="1280x720",
+        stream_active=True,
+        stream_url="http://192.168.8.114:8080/stream.mjpg",
+        fps=15,
+        resolution="640x480",
         camera_source=CameraSource.FRONT,
         last_frame_at=None,
     ),

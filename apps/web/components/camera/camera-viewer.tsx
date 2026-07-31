@@ -49,52 +49,30 @@ function StreamPlaceholder({
   robotName,
   fps,
   quality,
+  streamUrl,
 }: {
   active: boolean;
   robotName: string;
   fps: number;
   quality: StreamQuality;
+  streamUrl?: string | null;
 }) {
   return (
     <div
       className={cn(
         "relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border-2 border-dashed",
-        active
-          ? "border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-black to-emerald-950/40"
-          : "border-muted bg-muted/30",
+        "border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-black to-emerald-950/40",
       )}
     >
-      {/* Simulated scan lines for "live" feel */}
-      {active && (
-        <>
-          <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(0,255,100,0.03)_2px,rgba(0,255,100,0.03)_4px)]" />
-          <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-b from-transparent via-emerald-500/5 to-transparent" />
-        </>
-      )}
-
-      <div className="z-10 flex flex-col items-center gap-2 text-center">
-        {active ? (
-          <>
-            <Video className="h-10 w-10 text-emerald-400 animate-pulse" />
-            <p className="text-sm font-medium text-emerald-300">
-              Live Feed — {robotName}
-            </p>
-            <p className="text-xs text-emerald-500/70">
-              MJPEG stream · {QUALITY_PRESETS[quality].resolution}
-            </p>
-          </>
-        ) : (
-          <>
-            <VideoOff className="h-10 w-10 text-muted-foreground" />
-            <p className="text-sm font-medium text-muted-foreground">
-              Stream Offline
-            </p>
-            <p className="text-xs text-muted-foreground/70">
-              {robotName} camera is not active
-            </p>
-          </>
-        )}
-      </div>
+      {/* Always show the live feed since the Pi is broadcasting continuously */}
+      <>
+        <img
+          src={streamUrl || "http://192.168.8.114:8080/stream.mjpg"}
+          alt="Live Feed"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="pointer-events-none absolute inset-0 bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(0,255,100,0.03)_2px,rgba(0,255,100,0.03)_4px)]" />
+      </>
 
       {/* Overlay status indicators */}
       {active && (
@@ -242,8 +220,16 @@ export function CameraViewer() {
 
   // ── Snapshot action ────────────────────────────────────────────────
 
-  const handleSnapshot = useCallback(() => {
+  const handleSnapshot = useCallback(async () => {
     if (!selectedRobotId) return;
+    
+    // Trigger actual hardware capture on the Pi
+    try {
+      await fetch("http://192.168.8.114:8080/capture", { mode: 'no-cors' });
+    } catch (e) {
+      console.error("Hardware capture trigger failed:", e);
+    }
+
     const socket = getSocket();
     if (socket.connected) {
       socket.emit("camera_snapshot", {
@@ -358,10 +344,11 @@ export function CameraViewer() {
         {/* Video feed area */}
         {selectedStream ? (
           <StreamPlaceholder
-            active={selectedStream.stream_active}
+            active={true} // Force active to true since Pi streams continuously
             robotName={selectedStream.robot_name}
             fps={selectedStream.fps}
             quality={quality}
+            streamUrl={selectedStream.stream_url}
           />
         ) : (
           <div className="flex aspect-video items-center justify-center rounded-lg border-2 border-dashed border-muted bg-muted/20">

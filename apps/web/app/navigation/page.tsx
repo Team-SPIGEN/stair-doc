@@ -13,7 +13,7 @@
  */
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -130,6 +130,32 @@ export default function NavigationPage() {
     bridgeConnected,
     sendNavCommand,
   } = useNavigationSocket();
+
+  const repeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startRepeatingCommand = useCallback((command: string) => {
+    if (repeatIntervalRef.current) return;
+    sendNavCommand(command, robotId);
+    repeatIntervalRef.current = setInterval(() => {
+      sendNavCommand(command, robotId);
+    }, 150);
+  }, [robotId, sendNavCommand]);
+
+  const stopRepeatingCommand = useCallback(() => {
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current);
+      repeatIntervalRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (repeatIntervalRef.current) {
+        clearInterval(repeatIntervalRef.current);
+      }
+    };
+  }, []);
+
   const esp32Connected = robot?.sensors.esp32_connected ?? false;
   const esp32Port = robot?.sensors.esp32_port ?? "not detected";
   const esp32Connection = robot?.sensors.esp32_connection ?? "serial";
@@ -171,6 +197,7 @@ export default function NavigationPage() {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
       const cmd = keyMap[e.key];
       if (cmd && !isEmergency && !isAutonomous) {
         e.preventDefault();
@@ -427,7 +454,14 @@ export default function NavigationPage() {
                 size="sm"
                 variant="outline"
                 disabled={movementDisabled}
-                onClick={() => sendNavCommand("front_servo_up", robotId)}
+                onMouseDown={() => startRepeatingCommand("front_servo_up")}
+                onMouseUp={stopRepeatingCommand}
+                onMouseLeave={stopRepeatingCommand}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  startRepeatingCommand("front_servo_up");
+                }}
+                onTouchEnd={stopRepeatingCommand}
               >
                 Front Up
               </Button>
@@ -435,7 +469,14 @@ export default function NavigationPage() {
                 size="sm"
                 variant="outline"
                 disabled={movementDisabled}
-                onClick={() => sendNavCommand("front_servo_down", robotId)}
+                onMouseDown={() => startRepeatingCommand("front_servo_down")}
+                onMouseUp={stopRepeatingCommand}
+                onMouseLeave={stopRepeatingCommand}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  startRepeatingCommand("front_servo_down");
+                }}
+                onTouchEnd={stopRepeatingCommand}
               >
                 Front Down
               </Button>
@@ -443,7 +484,14 @@ export default function NavigationPage() {
                 size="sm"
                 variant="outline"
                 disabled={movementDisabled}
-                onClick={() => sendNavCommand("rear_servo_up", robotId)}
+                onMouseDown={() => startRepeatingCommand("rear_servo_up")}
+                onMouseUp={stopRepeatingCommand}
+                onMouseLeave={stopRepeatingCommand}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  startRepeatingCommand("rear_servo_up");
+                }}
+                onTouchEnd={stopRepeatingCommand}
               >
                 Rear Up
               </Button>
@@ -451,7 +499,14 @@ export default function NavigationPage() {
                 size="sm"
                 variant="outline"
                 disabled={movementDisabled}
-                onClick={() => sendNavCommand("rear_servo_down", robotId)}
+                onMouseDown={() => startRepeatingCommand("rear_servo_down")}
+                onMouseUp={stopRepeatingCommand}
+                onMouseLeave={stopRepeatingCommand}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  startRepeatingCommand("rear_servo_down");
+                }}
+                onTouchEnd={stopRepeatingCommand}
               >
                 Rear Down
               </Button>

@@ -172,16 +172,24 @@ def apply_bridge_telemetry(robot: dict[str, Any], data: dict[str, Any]) -> None:
         robot["stair_detected"] = sensors.get(
             "stair_detected", sensors.get("stairDetected", robot["stair_detected"])
         )
-        robot["distance_to_obstacle"] = sensors.get(
-            "distance_to_obstacle",
-            sensors.get("distanceToObstacle", robot["distance_to_obstacle"]),
-        )
+        dist = sensors.get("distance_to_obstacle", sensors.get("distanceToObstacle"))
+        if dist is not None:
+            try:
+                val = float(dist)
+                robot["distance_to_obstacle"] = val if val >= 0 else None
+            except (ValueError, TypeError):
+                robot["distance_to_obstacle"] = None
+        else:
+            robot["distance_to_obstacle"] = None
         robot["incline_angle"] = sensors.get(
             "incline_angle", sensors.get("inclineAngle", robot["incline_angle"])
         )
-        robot["weight_kg"] = sensors.get(
-            "weight_kg", sensors.get("weightKg", robot["weight_kg"])
-        )
+        weight = sensors.get("weight_kg", sensors.get("weightKg"))
+        if weight is not None:
+            try:
+                robot["weight_kg"] = max(0.0, float(weight))
+            except (ValueError, TypeError):
+                pass
         robot["esp32_connected"] = sensors.get(
             "esp32_connected",
             sensors.get("esp32Connected", robot.get("esp32_connected", False)),
