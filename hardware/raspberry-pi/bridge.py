@@ -412,7 +412,13 @@ class PiPeripherals:
         self._pwm = None
         try:
             import RPi.GPIO as GPIO
+            import mfrc522
             from mfrc522 import SimpleMFRC522
+            
+            # Monkey-patch SimpleMFRC522 to force it to use BCM mode (11) and Reset Pin 25
+            def custom_mfrc522_init(self_obj):
+                self_obj.READER = mfrc522.MFRC522(pin_mode=11, pin_rst=25)
+            SimpleMFRC522.__init__ = custom_mfrc522_init
 
             self.GPIO = GPIO
             GPIO.setwarnings(False)
@@ -447,11 +453,15 @@ class PiPeripherals:
     def denied_feedback(self) -> None:
         if not self._gpio_ok:
             return
-        for _ in range(3):
-            self.GPIO.output(BUZZER, self.GPIO.HIGH)
-            time.sleep(0.2)
-            self.GPIO.output(BUZZER, self.GPIO.LOW)
-            time.sleep(0.2)
+        try:
+            buzzer_pwm = self.GPIO.PWM(BUZZER, 2000)
+            for _ in range(3):
+                buzzer_pwm.start(50)
+                time.sleep(0.2)
+                buzzer_pwm.stop()
+                time.sleep(0.2)
+        except Exception as e:
+            print(f"Buzzer error: {e}")
 
     def take_photo(self, tag_id: str) -> Path | None:
         PHOTO_DIR.mkdir(parents=True, exist_ok=True)

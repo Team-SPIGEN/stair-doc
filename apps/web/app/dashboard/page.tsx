@@ -22,6 +22,7 @@ import {
   Wifi,
   WifiOff,
   Zap,
+  Weight,
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 
@@ -74,11 +75,12 @@ export default function DashboardPage() {
       />
 
       {/* Quick Stats */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-5">
         <QuickStat icon={Bot} label="Status" value={robots[0]?.status ?? "offline"} sub={robots[0]?.name ?? "StairBot"} />
         <QuickStat icon={Package} label="Deliveries" value={totalDeliveries.toLocaleString()} sub="All-time total" />
         <QuickStat icon={ArrowUpDown} label="Stairs" value={totalStairs.toLocaleString()} sub="Flights climbed" />
         <QuickStat icon={Activity} label="Battery" value={`${robots[0]?.battery.level ?? 0}%`} sub={robots[0]?.battery.is_charging ? "Charging" : "Level"} />
+        <QuickStat icon={Weight} label="Payload Weight" value={`${(robots[0]?.sensors.weight_kg ?? 0.0).toFixed(2)} kg`} sub="HX711 Loadcell" />
       </div>
 
       {/* Main content */}

@@ -252,6 +252,18 @@ def _map_callback(msg: Any) -> None:
     _latest_map_pts = pts
 
 
+_latest_weight_kg: float = 0.0
+
+
+def _weight_callback(msg: Any) -> None:
+    """Callback for /stairbot/weight (Float32 in grams)."""
+    global _latest_weight_kg
+    try:
+        _latest_weight_kg = round(float(msg.data) / 1000.0, 3)
+    except (ValueError, TypeError):
+        pass
+
+
 def _quat_to_yaw_deg(q: Any) -> float:
     """Extract yaw angle (degrees) from a ROS 2 quaternion."""
     yaw_rad = math.atan2(
@@ -329,6 +341,7 @@ def _init_ros(slam_mode: str, max_retries: int = 5) -> Any:
     from sensor_msgs.msg import LaserScan                                   # type: ignore[import]
     from nav_msgs.msg import OccupancyGrid, Odometry                       # type: ignore[import]
     from geometry_msgs.msg import PoseWithCovarianceStamped, Twist         # type: ignore[import]
+    from std_msgs.msg import Float32                                       # type: ignore[import]
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -349,6 +362,7 @@ def _init_ros(slam_mode: str, max_retries: int = 5) -> Any:
     node.create_subscription(OccupancyGrid,              "/map",       _map_callback,    1)
     node.create_subscription(Odometry,                   "/odom",      _odom_callback,  10)
     node.create_subscription(PoseWithCovarianceStamped,  "/amcl_pose", _amcl_callback,  10)
+    node.create_subscription(Float32,                    "/stairbot/weight", _weight_callback, 10)
 
     _cmd_vel_pub = node.create_publisher(Twist, "/cmd_vel", 10)
 
@@ -363,7 +377,7 @@ def _init_ros(slam_mode: str, max_retries: int = 5) -> Any:
 
     print(
         f"[ros2_bridge] ROS 2 ready  mode={slam_mode}  "
-        "subscribed: /scan /map /odom /amcl_pose"
+        "subscribed: /scan /map /odom /amcl_pose /stairbot/weight"
     )
     return node
 
@@ -417,7 +431,10 @@ async def _emit_map_loop(slam_mode: str) -> None:
                 await sio.emit("bridge_telemetry", {
                     "robot_id": ROBOT_ID,
                     "location": {"x": pose["x"], "y": pose["y"]},
-                    "sensors":  {"esp32_connected": True},
+                    "sensors":  {
+                        "esp32_connected": True,
+                        "weight_kg": _latest_weight_kg,
+                    },
                 })
             except Exception as exc:
                 print(f"[ros2_bridge] pose emit error: {exc}")

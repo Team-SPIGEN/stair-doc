@@ -26,6 +26,7 @@ import {
   RefreshCw,
   ChevronRight,
   MapPin,
+  Weight,
 } from "lucide-react";
 import { VoiceControl } from "@/components/voice/voice-control";
 import type { VoiceCommandResponse } from "@/lib/api/voice";
@@ -131,7 +132,7 @@ export function StairDocDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatsCard
           title="Robot Status"
           value={robots[0]?.status ?? "offline"}
@@ -159,6 +160,13 @@ export function StairDocDashboard() {
           subtitle={robots[0]?.battery.is_charging ? "Charging" : "Current level"}
           icon={Zap}
           gradient="orange"
+        />
+        <StatsCard
+          title="Payload Weight"
+          value={`${(robots[0]?.sensors.weight_kg ?? 0.0).toFixed(2)} kg`}
+          subtitle="HX711 Loadcell"
+          icon={Weight}
+          gradient="cyan"
         />
       </div>
 
