@@ -34,6 +34,11 @@ _robot: dict[str, Any] = {
     "esp32_connected": False,
     "esp32_port": None,
     "esp32_connection": None,
+    "ros2_ready": False,
+    "nav2_ready": False,
+    "micro_ros_agent": False,
+    "amcl_ready": False,
+    "slam_mode": None,
 }
 
 

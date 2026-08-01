@@ -197,6 +197,40 @@ Press Space (hold 0.8s) in the PWA → sends `emergency_stop` → Pi sends `s` t
 
 ---
 
+## Destination autonomous navigation (Nav2 / micro-ROS)
+
+Autonomous Mode on `/navigation` navigates to a **named Destination** on the current map.
+Manual Mode uses the **same** ROS stack (`/cmd_vel` via micro_ros_agent).
+
+### Flow
+
+```
+Manual:  Web joystick → Socket.IO → ros2_bridge → /cmd_vel → micro_ros_agent → ESP
+Auto:    Web Destination → locations.json → navigate_to → NavigateToPose
+```
+
+**UART ESP motor bridge is disabled.** Do not run `stairdoc-bridge` against `/dev/sensors/esp32`.
+
+### Prerequisites on the Pi
+
+1. `micro_ros_agent` owns `/dev/sensors/esp32` (exactly one owner)
+2. Nav2 + AMCL for Destination (localization mode)
+3. `ros2_bridge.py` registered to the API (`start_ros2_bridge.sh` / systemd)
+4. Optional: `stairdoc-ros2-sensors` for RFID/camera/door GPIO (never opens ESP serial)
+
+### Mode separation
+
+| Feature | Transport |
+|---------|-----------|
+| Manual joystick / WASD | `ros2_bridge` → `/cmd_vel` |
+| Destination → Nav2 | `ros2_bridge` → `NavigateToPose` |
+| Chassis servo sweeps (u/d/v/e) | **Disabled** — Coming soon (needs ROS servo API) |
+| RFID / camera / door GPIO | `bridge.py` sensors-only (`ESP32_ENABLED=false`) |
+
+Switching Manual ↔ Autonomous does **not** require stopping the agent or reclaiming the ESP port.
+
+---
+
 ## LIDAR / mapping
 
 **No LIDAR hardware is required.** The navigation page shows:

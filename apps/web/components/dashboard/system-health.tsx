@@ -163,7 +163,7 @@ export function SystemHealth({ health, isConnected, className }: SystemHealthPro
           <ServiceRow label="LIDAR" status={health.lidar_status} icon={Radio} />
           <ServiceRow label="Camera" status={health.camera_status} icon={Camera} />
           <ServiceRow label="Database" status={health.database_connected} icon={Database} />
-          <ServiceRow label="Pi Bridge" status={bridgeConnected} icon={Wifi} />
+          <ServiceRow label="ROS relay" status={bridgeConnected} icon={Wifi} />
         </div>
 
         {/* Separator */}

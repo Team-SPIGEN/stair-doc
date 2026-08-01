@@ -30,7 +30,8 @@ _bridge_robot_pose: dict[str, dict[str, float]] = {}
 # robot_id → last telemetry push timestamp
 _bridge_last_seen: dict[str, datetime] = {}
 
-# Map app navigation actions → ESP32 Bluetooth single-char commands
+# Map app navigation actions → legacy UART chars (DEPRECATED — unused).
+# Manual drive uses ros2_bridge → /cmd_vel. Do not reopen ESP serial for these.
 NAV_TO_BT: dict[str, str] = {
     "forward": "f",
     "backward": "b",
@@ -47,6 +48,18 @@ NAV_TO_BT: dict[str, str] = {
     "rear_down": "e",
     "rear_servo_down": "e",
 }
+
+# Drive / E-stop actions go to ROS /cmd_vel — never emit UART bt_command.
+_ROS_DRIVE_ACTIONS = frozenset({
+    "forward",
+    "backward",
+    "left",
+    "right",
+    "stop",
+    "emergency_stop",
+    "navigate_to",
+    "autonomous",
+})
 
 
 def normalize_tag_id(raw: str) -> str:
@@ -209,6 +222,14 @@ def apply_bridge_telemetry(robot: dict[str, Any], data: dict[str, Any]) -> None:
             sensors.get("esp32Connection", robot.get("esp32_connection")),
         )
 
+    ros2 = get_field(data, "ros2")
+    if isinstance(ros2, dict):
+        robot["ros2_ready"] = bool(ros2.get("ready", True))
+        robot["nav2_ready"] = bool(ros2.get("nav2_ready", False))
+        robot["micro_ros_agent"] = bool(ros2.get("micro_ros_agent", False))
+        robot["amcl_ready"] = bool(ros2.get("amcl_ready", False))
+        robot["slam_mode"] = ros2.get("slam_mode", robot.get("slam_mode"))
+
     speed = get_field(data, "speed")
     if speed is not None:
         robot["speed"] = speed
@@ -278,14 +299,19 @@ def build_bridge_command_payload(
     target_floor: int | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the command payload forwarded to the Pi bridge."""
+    """Build the command payload forwarded to ros2_bridge (Socket.IO).
+
+    UART ``bt_command`` is omitted for drive/nav actions — Manual uses /cmd_vel.
+    """
     payload: dict[str, Any] = {
         "action": action,
         "robot_id": robot_id,
-        "bt_command": NAV_TO_BT.get(action),
         "speed": speed,
         "timestamp": datetime.now(UTC).isoformat(),
     }
+    # Never attach UART chars for ROS drive path (dead path for motor serial)
+    if action not in _ROS_DRIVE_ACTIONS:
+        payload["bt_command"] = NAV_TO_BT.get(action)
     if target_floor is not None:
         payload["target_floor"] = target_floor
     if extra:

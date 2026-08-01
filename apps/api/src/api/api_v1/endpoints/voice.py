@@ -313,12 +313,25 @@ async def process_voice_command(body: VoiceCommandRequest) -> dict:
 
     try:
         if intent.action in (VoiceAction.NAVIGATE, VoiceAction.RETURN_HOME):
-            floor = intent.target_floor or (1 if intent.action == VoiceAction.RETURN_HOME else 1)
+            floor = intent.target_floor or 0
+            # Destination is required for Nav2; floor-only voice is deferred (coming soon)
+            location = (
+                "Base Station"
+                if intent.action == VoiceAction.RETURN_HOME
+                else (getattr(intent, "target_location", None) or "home")
+            )
+            # Exit any active Manual/Autonomous mode before a new Nav2 goal
+            await nav_api.send_command(
+                ManualCommandRequest(
+                    command=NavigationCommand.STOP,
+                    robot_id=body.robot_id,
+                )
+            )
             nav_result = await nav_api.start_autonomous(
                 AutonomousRequest(
                     robot_id=body.robot_id,
                     target_floor=floor,
-                    target_location="Base Station" if intent.action == VoiceAction.RETURN_HOME else None,
+                    target_location=location,
                 )
             )
             message = nav_result.get("message", "Navigation started")

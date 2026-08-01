@@ -27,9 +27,10 @@ def test_nav_to_bt_mapping():
 def test_build_bridge_command_payload():
     payload = build_bridge_command_payload("forward", "robot-001", speed=0.8)
     assert payload["action"] == "forward"
-    assert payload["bt_command"] == "f"
     assert payload["robot_id"] == "robot-001"
     assert payload["speed"] == 0.8
+    # Drive actions must NOT carry UART bt_command (ROS /cmd_vel path)
+    assert "bt_command" not in payload or payload.get("bt_command") is None
 
 
 def test_ultrasonic_to_lidar():

@@ -1,18 +1,35 @@
 """Navigation control endpoints for Stair-Doc.
 
-Provides manual joystick commands, autonomous navigation,
-and navigation status — all with mock in-memory state.
+Manual joystick → Socket.IO → ros2_bridge → geometry_msgs/Twist on /cmd_vel
+  (micro_ros_agent on the ESP — NOT UART serial chars).
+
+Autonomous Destination → locations.json lookup → NavigateToPose via ros2_bridge.
+
+Manual and Autonomous are hard-separated: cross-mode commands return 409.
 """
 
-import uuid
-from datetime import UTC, datetime, timedelta
-from typing import Optional
+import math
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from src.core.bridge import build_bridge_command_payload, get_bridge_sid
+from src.core.bridge import build_bridge_command_payload, get_bridge_sid, get_robot_pose
+from src.core.locations import find_location, list_locations, normalize_destination
+from src.core.nav_state import (
+    arm_autonomous,
+    assert_can_autonomous,
+    assert_can_enter_mode,
+    assert_can_manual,
+    clear_emergency,
+    enter_autonomous,
+    enter_emergency,
+    enter_idle,
+    enter_manual,
+    mode_of,
+    require_known_robot,
+)
 from src.core.robot import ROBOT_ID
-from src.core.robot_state import get_robot
 from src.core.socket import sio
 
 from src.schemas.base import ApiResponse, success_response
@@ -21,47 +38,26 @@ from src.schemas.navigation import (
     AutonomousResponse,
     CommandResponse,
     ManualCommandRequest,
+    ModeSwitchRequest,
     NavigationCommand,
     NavigationMode,
     NavigationStatusResponse,
+    NavGoalPose,
 )
 
 router = APIRouter(prefix="/navigation", tags=["navigation"])
 
-# ── Mock In-Memory State ─────────────────────────────────────────────────
 
-_nav_state: dict[str, dict] = {
-    "robot-001": {
-        "mode": NavigationMode.IDLE,
-        "target_floor": None,
-        "target_location": None,
-        "progress": 0.0,
-        "eta_seconds": None,
-        "current_speed": 0.0,
-        "emergency_active": False,
-    },
-}
-
-
-def _get_nav_state(robot_id: str) -> dict:
-    """Get navigation state for the single robot."""
-    if robot_id != ROBOT_ID:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Robot with id '{robot_id}' not found",
-        )
-    return _nav_state[robot_id]
-
-
-def _assert_motor_controller_ready(robot_id: str) -> None:
-    """Reject physical movement when the live bridge has no ESP32 serial link."""
-    if not get_bridge_sid(robot_id):
-        return
-    if get_robot().get("esp32_connected", False):
+def _assert_ros_bridge_ready(robot_id: str) -> None:
+    """Manual and autonomous motion require ros2_bridge (Socket.IO → /cmd_vel / Nav2)."""
+    if get_bridge_sid(robot_id):
         return
     raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="ESP32 motor controller is not connected. Check the Pi serial device before moving.",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            "ROS relay offline. Start micro_ros_agent + ros2_bridge on the Pi "
+            "(Manual /cmd_vel and Destination Nav2 share that stack)."
+        ),
     )
 
 
@@ -71,6 +67,7 @@ async def _forward_to_bridge(
     *,
     speed: float = 0.5,
     target_floor: int | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     sid = get_bridge_sid(robot_id)
     if not sid:
@@ -82,12 +79,61 @@ async def _forward_to_bridge(
             robot_id,
             speed=speed,
             target_floor=target_floor,
+            extra=extra,
         ),
         to=sid,
     )
 
 
+def _estimate_eta(goal_x: float, goal_y: float) -> int:
+    """Rough ETA from current pose (or origin) at ~0.4 m/s."""
+    pose = get_robot_pose(ROBOT_ID)
+    sx = float(pose["x"]) if pose else 0.0
+    sy = float(pose["y"]) if pose else 0.0
+    dist = math.hypot(goal_x - sx, goal_y - sy)
+    return max(15, int(dist / 0.4) + 10)
+
+
+async def _broadcast_nav_status(robot_id: str) -> None:
+    """Keep Socket.IO clients in sync after REST mode changes."""
+    from src.core.socket import _build_nav_status_payload
+
+    await sio.emit("nav_status", _build_nav_status_payload(robot_id))
+
+
+def _status_response(robot_id: str, now: datetime) -> NavigationStatusResponse:
+    state = require_known_robot(robot_id)
+    return NavigationStatusResponse(
+        robot_id=robot_id,
+        mode=NavigationMode(mode_of(state)),
+        target_floor=state["target_floor"],
+        target_location=state["target_location"],
+        progress=round(state["progress"], 3),
+        eta_seconds=state["eta_seconds"],
+        current_speed=state["current_speed"],
+        emergency_active=state["emergency_active"],
+        timestamp=now,
+    )
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/locations",
+    response_model=ApiResponse[dict],
+    summary="List named Destinations",
+    description=(
+        "Returns rooms from maps/locations.json (id, aliases, map-frame x/y/yaw). "
+        "Used by the Navigation page Destination field."
+    ),
+)
+async def get_locations() -> dict:
+    rooms = list_locations()
+    return success_response(
+        {"rooms": rooms, "count": len(rooms)},
+        "Destination catalog",
+    )
 
 
 @router.post(
@@ -97,22 +143,15 @@ async def _forward_to_bridge(
     description=(
         "Send a directional command to a specific robot. "
         "Commands: forward, backward, left, right, stop, emergency_stop. "
+        "Manual directions require idle/manual mode (409 if autonomous). "
         "Speed in m/s (0–1.0), duration in seconds (0 = continuous)."
     ),
 )
 async def send_command(body: ManualCommandRequest) -> dict:
-    state = _get_nav_state(body.robot_id)
     now = datetime.now(UTC)
 
     if body.command == NavigationCommand.EMERGENCY_STOP:
-        state["mode"] = NavigationMode.EMERGENCY
-        state["current_speed"] = 0.0
-        state["emergency_active"] = True
-        state["progress"] = 0.0
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["eta_seconds"] = None
-
+        enter_emergency(body.robot_id)
         result = CommandResponse(
             success=True,
             command=body.command.value,
@@ -121,35 +160,38 @@ async def send_command(body: ManualCommandRequest) -> dict:
             timestamp=now,
         )
         await _forward_to_bridge(body.robot_id, body.command.value, speed=0.0)
+        await _broadcast_nav_status(body.robot_id)
         return success_response(result, "Emergency stop activated")
 
-    if state["emergency_active"]:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Emergency stop is active. Reset before sending commands.",
+    if body.command == NavigationCommand.STOP:
+        enter_idle(body.robot_id)
+        result = CommandResponse(
+            success=True,
+            command=body.command.value,
+            robot_id=body.robot_id,
+            speed=0.0,
+            timestamp=now,
+        )
+        await _forward_to_bridge(body.robot_id, body.command.value, speed=0.0)
+        await _broadcast_nav_status(body.robot_id)
+        return success_response(
+            result,
+            f"Command '{body.command.value}' sent to {body.robot_id}",
         )
 
-    if body.command == NavigationCommand.STOP:
-        state["current_speed"] = 0.0
-        if state["mode"] == NavigationMode.MANUAL:
-            state["mode"] = NavigationMode.IDLE
-    else:
-        _assert_motor_controller_ready(body.robot_id)
-        state["mode"] = NavigationMode.MANUAL
-        state["current_speed"] = body.speed
+    state = require_known_robot(body.robot_id)
+    assert_can_manual(state)
+    enter_manual(body.robot_id, speed=body.speed)
 
     result = CommandResponse(
         success=True,
         command=body.command.value,
         robot_id=body.robot_id,
-        speed=body.speed if body.command != NavigationCommand.STOP else 0.0,
+        speed=body.speed,
         timestamp=now,
     )
-    await _forward_to_bridge(
-        body.robot_id,
-        body.command.value,
-        speed=body.speed if body.command != NavigationCommand.STOP else 0.0,
-    )
+    await _forward_to_bridge(body.robot_id, body.command.value, speed=body.speed)
+    await _broadcast_nav_status(body.robot_id)
     return success_response(
         result,
         f"Command '{body.command.value}' sent to {body.robot_id}",
@@ -159,26 +201,39 @@ async def send_command(body: ManualCommandRequest) -> dict:
 @router.post(
     "/autonomous",
     response_model=ApiResponse[AutonomousResponse],
-    summary="Start autonomous navigation",
+    summary="Start autonomous navigation to a Destination",
     description=(
-        "Command a robot to autonomously navigate to a target floor/location. "
-        "Returns estimated ETA and planned waypoint path."
+        "Look up Destination in maps/locations.json and send a Nav2 NavigateToPose "
+        "goal via ros2_bridge (Socket.IO → ROS 2). Requires idle or armed autonomous "
+        "(409 if Manual or an Autonomous goal is already active)."
     ),
 )
 async def start_autonomous(body: AutonomousRequest) -> dict:
-    state = _get_nav_state(body.robot_id)
     now = datetime.now(UTC)
+    state = require_known_robot(body.robot_id)
+    assert_can_autonomous(state)
 
-    if state["emergency_active"]:
+    destination = normalize_destination(body.target_location)
+    if not destination:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Emergency stop is active. Reset before navigating.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Destination is required. Enter a room name from the locations catalog.",
         )
 
-    _assert_motor_controller_ready(body.robot_id)
+    room = find_location(destination)
+    if room is None:
+        known = ", ".join(r["id"] for r in list_locations()) or "(catalog empty)"
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Unknown destination {destination!r}. "
+                f"Known rooms: {known}. Edit maps/locations.json to add rooms."
+            ),
+        )
 
-    floor_diff = abs(body.target_floor - 1)
-    eta_seconds = max(30, floor_diff * 30)
+    _assert_ros_bridge_ready(body.robot_id)
+
+    eta_seconds = _estimate_eta(room.x, room.y)
     eta_minutes = eta_seconds // 60
     eta_remaining_seconds = eta_seconds % 60
     eta_display = (
@@ -187,51 +242,107 @@ async def start_autonomous(body: AutonomousRequest) -> dict:
         else f"{eta_seconds}s"
     )
 
-    current_floor = 1
-    path = [
-        {"x": 50.0, "y": 20.0, "floor": current_floor, "label": "Start"},
-        {"x": 50.0, "y": 50.0, "floor": current_floor, "label": "Corridor"},
-        {"x": 20.0, "y": 50.0, "floor": current_floor, "label": "Stairwell"},
-    ]
-    for f in range(
-        min(current_floor, body.target_floor) + 1,
-        max(current_floor, body.target_floor) + 1,
-    ):
-        path.append({"x": 20.0, "y": 50.0, "floor": f, "label": f"Floor {f}"})
-    if body.target_location:
-        path.append(
-            {"x": 70.0, "y": 60.0, "floor": body.target_floor, "label": body.target_location}
-        )
-    else:
-        path.append(
-            {"x": 50.0, "y": 50.0, "floor": body.target_floor, "label": "Destination"}
-        )
+    goal = NavGoalPose(
+        x=room.x,
+        y=room.y,
+        yaw=room.yaw,
+        frame_id=room.frame_id,
+        room_id=room.id,
+        map=room.map,
+    )
 
-    # Update state
-    state["mode"] = NavigationMode.AUTONOMOUS
-    state["target_floor"] = body.target_floor
-    state["target_location"] = body.target_location
-    state["progress"] = 0.0
-    state["eta_seconds"] = eta_seconds
-    state["current_speed"] = 0.7
+    path = [
+        {
+            "x": room.x,
+            "y": room.y,
+            "floor": body.target_floor,
+            "label": room.id,
+            "yaw": room.yaw,
+        }
+    ]
+
+    enter_autonomous(
+        body.robot_id,
+        target_floor=body.target_floor,
+        target_location=destination,
+        eta_seconds=eta_seconds,
+        speed=0.4,
+    )
+
     await _forward_to_bridge(
         body.robot_id,
-        "autonomous",
-        speed=0.7,
+        "navigate_to",
+        speed=0.4,
         target_floor=body.target_floor,
+        extra={
+            "target_location": destination,
+            "targetLocation": destination,
+            "room_id": room.id,
+            "goal": {
+                "x": room.x,
+                "y": room.y,
+                "yaw": room.yaw,
+                "heading": math.degrees(room.yaw),
+                "frame_id": room.frame_id,
+            },
+        },
     )
+    await _broadcast_nav_status(body.robot_id)
 
     result = AutonomousResponse(
         success=True,
         robot_id=body.robot_id,
         target_floor=body.target_floor,
-        target_location=body.target_location,
+        target_location=destination,
+        goal=goal,
         eta_seconds=eta_seconds,
         eta_display=eta_display,
         path=path,
+        message=(
+            f"Nav2 goal sent to {room.id} "
+            f"({room.x:.3f}, {room.y:.3f}, yaw={room.yaw:.3f} rad)"
+        ),
         timestamp=now,
     )
-    return success_response(result, "Autonomous navigation started")
+    return success_response(result, result.message)
+
+
+@router.post(
+    "/mode",
+    response_model=ApiResponse[NavigationStatusResponse],
+    summary="Enter or exit a navigation mode",
+    description=(
+        "Hub Enter Manual / Enter Autonomous / Exit. "
+        "Entering requires idle (or already that mode). "
+        "Exiting (idle) cancels Nav2 + zeros /cmd_vel. "
+        "Enter Autonomous arms the mode (blocks Manual) but does not send a Nav2 goal — "
+        "use POST /autonomous to start Destination navigation."
+    ),
+)
+async def switch_mode(body: ModeSwitchRequest) -> dict:
+    now = datetime.now(UTC)
+    state = require_known_robot(body.robot_id)
+    target = body.mode.value
+
+    if target == NavigationMode.IDLE.value:
+        enter_idle(body.robot_id)
+        await _forward_to_bridge(body.robot_id, "stop", speed=0.0)
+    elif target == NavigationMode.MANUAL.value:
+        assert_can_enter_mode(state, target)
+        enter_manual(body.robot_id, speed=0.0)
+    elif target == NavigationMode.AUTONOMOUS.value:
+        arm_autonomous(body.robot_id)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported mode '{target}'",
+        )
+
+    await _broadcast_nav_status(body.robot_id)
+    return success_response(
+        _status_response(body.robot_id, now),
+        f"Mode set to {mode_of(require_known_robot(body.robot_id))}",
+    )
 
 
 @router.get(
@@ -243,21 +354,10 @@ async def start_autonomous(body: AutonomousRequest) -> dict:
 async def get_nav_status(
     robot_id: str = Query("robot-001", description="Robot ID"),
 ) -> dict:
-    state = _get_nav_state(robot_id)
-    now = datetime.now(UTC)
-
-    result = NavigationStatusResponse(
-        robot_id=robot_id,
-        mode=state["mode"],
-        target_floor=state["target_floor"],
-        target_location=state["target_location"],
-        progress=round(state["progress"], 3),
-        eta_seconds=state["eta_seconds"],
-        current_speed=state["current_speed"],
-        emergency_active=state["emergency_active"],
-        timestamp=now,
+    return success_response(
+        _status_response(robot_id, datetime.now(UTC)),
+        "Navigation status retrieved",
     )
-    return success_response(result, "Navigation status retrieved")
 
 
 @router.post(
@@ -269,18 +369,8 @@ async def get_nav_status(
 async def reset_emergency_stop(
     robot_id: str = Query("robot-001", description="Robot ID"),
 ) -> dict:
-    state = _get_nav_state(robot_id)
     now = datetime.now(UTC)
-
-    if not state["emergency_active"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Emergency stop is not active.",
-        )
-
-    state["emergency_active"] = False
-    state["mode"] = NavigationMode.IDLE
-    state["current_speed"] = 0.0
+    clear_emergency(robot_id)
 
     result = CommandResponse(
         success=True,
@@ -290,4 +380,5 @@ async def reset_emergency_stop(
         timestamp=now,
     )
     await _forward_to_bridge(robot_id, "stop", speed=0.0)
+    await _broadcast_nav_status(robot_id)
     return success_response(result, "Emergency stop reset")

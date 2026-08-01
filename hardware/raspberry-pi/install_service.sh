@@ -28,10 +28,11 @@ sudo -u spigen python3 -m pip install --user -r "$APP_DIR/requirements.txt"
 sudo -u spigen python3 -m pip install --user --break-system-packages RPi.GPIO mfrc522 || \
 sudo -u spigen python3 -m pip install --user RPi.GPIO mfrc522 || true
 
-# 1. Standalone Service (Claim serial port + socket link)
+# 1. DEPRECATED — UART ESP motor bridge (disabled; unit kept for explicit opt-in only)
+# Manual + Auto now require micro_ros_agent + ros2_bridge. Do NOT enable this unit.
 cat > "$SERVICE_BRIDGE" <<'EOF'
 [Unit]
-Description=Stair-Doc Raspberry Pi Bridge (Standalone Mode)
+Description=Stair-Doc UART ESP Bridge (DEPRECATED — do not enable)
 After=network-online.target
 Wants=network-online.target
 Conflicts=stairdoc-ros2-bridge.service stairdoc-ros2-sensors.service
@@ -41,6 +42,8 @@ Type=simple
 User=spigen
 WorkingDirectory=/home/spigen/stairdoc-bridge
 Environment=PYTHONUNBUFFERED=1
+Environment=ESP32_ENABLED=false
+Environment=BRIDGE_MODE=sensors_only
 ExecStart=/usr/bin/python3 /home/spigen/stairdoc-bridge/bridge.py
 Restart=always
 RestartSec=5
@@ -49,10 +52,10 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# 2. Sensors-only Service (RFID/Camera/Voice via REST, release serial + socket)
+# 2. Sensors-only Service (RFID/Camera/Voice via REST — never opens ESP serial)
 cat > "$SERVICE_SENSORS" <<'EOF'
 [Unit]
-Description=Stair-Doc Raspberry Pi Sensors Bridge (ROS2 Mode)
+Description=Stair-Doc Raspberry Pi Sensors (RFID/Camera/Voice — no ESP serial)
 After=network-online.target
 Wants=network-online.target
 Conflicts=stairdoc-bridge.service
@@ -72,10 +75,10 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# 3. ROS2 Socket.IO Bridge Relay (claims socket link, translates ROS2 topics)
+# 3. ROS2 Socket.IO Bridge Relay (Manual /cmd_vel + Destination NavigateToPose)
 cat > "$SERVICE_ROS2_BRIDGE" <<'EOF'
 [Unit]
-Description=Stair-Doc ROS2 Socket.IO Bridge Relay
+Description=Stair-Doc ROS2 Socket.IO Relay (/cmd_vel + Nav2)
 After=network-online.target
 Wants=network-online.target stairdoc-ros2-sensors.service
 Requires=stairdoc-ros2-sensors.service
@@ -100,16 +103,19 @@ systemctl daemon-reload
 systemctl disable --now full1.service 2>/dev/null || true
 systemctl disable --now spigen-bridge.service 2>/dev/null || true
 
-# Enable standalone by default
-systemctl enable --now stairdoc-bridge.service
+# Disable UART motor bridge; enable ROS stack (sensors + ros2 relay)
+systemctl disable --now stairdoc-bridge.service 2>/dev/null || true
+systemctl enable stairdoc-ros2-sensors.service
+systemctl enable stairdoc-ros2-bridge.service
 
 echo
-echo "Stair-Doc services installed successfully."
+echo "Stair-Doc services installed."
 echo
-echo "To run in STANDALONE mode (default):"
-echo "  sudo systemctl start stairdoc-bridge"
+echo "UART ESP motor bridge (stairdoc-bridge) is DISABLED."
+echo "Manual joystick and Destination Nav2 both use:"
+echo "  1) micro_ros_agent on /dev/sensors/esp32  (start_nav.sh)"
+echo "  2) sudo systemctl start stairdoc-ros2-bridge"
 echo
-echo "To run in ROS2 / SLAM mode:"
-echo "  sudo systemctl start stairdoc-ros2-bridge"
-echo "  (This automatically stops standalone mode, starts sensors-only + ROS2 relay)"
+echo "Sensors-only (RFID/camera/door GPIO) runs as stairdoc-ros2-sensors"
+echo "and never opens the ESP serial port."
 echo
