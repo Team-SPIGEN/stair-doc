@@ -66,6 +66,7 @@ function StreamPlaceholder({
     >
       {/* Always show the live feed since the Pi is broadcasting continuously */}
       <>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={streamUrl || "http://192.168.8.114:8080/stream.mjpg"}
           alt="Live Feed"

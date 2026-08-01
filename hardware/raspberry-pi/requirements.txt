@@ -1,9 +1,17 @@
+# ── Core (bridge.py — sync Socket.IO + ESP32 + REST) ─────────────────────
 python-socketio[client]>=5.11.0
 requests>=2.31.0
 pyserial>=3.5
 python-dotenv>=1.0.0
+
+# ── ROS 2 relay (ros2_bridge.py — async Socket.IO) ───────────────────────
+# python-socketio[asyncio] pulls in aiohttp; needed for the async client.
+aiohttp>=3.9.0
+
+# ── Optional voice recognition (bridge.py) ───────────────────────────────
 sounddevice>=0.4.6
 vosk>=0.3.45
-# Raspberry Pi only (install on the Pi, not on dev machine):
+
+# ── Raspberry Pi hardware only (install on Pi, not on dev machine) ────────
 # RPi.GPIO>=0.7.1
 # mfrc522>=0.0.7

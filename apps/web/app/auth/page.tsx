@@ -94,36 +94,7 @@ function LoginForm() {
             {isLoading ? "Signing in…" : "Sign In"}
           </Button>
 
-          {process.env.NODE_ENV === "development" && (
-            <div className="mt-6 rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 p-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground text-center uppercase tracking-wide">
-                Dev Quick Login
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: "Operator", email: "operator@stairdoc.com", color: "bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30 text-blue-700 dark:text-blue-400" },
-                  { label: "Recipient", email: "recipient@stairdoc.com", color: "bg-green-500/10 hover:bg-green-500/20 border-green-500/30 text-green-700 dark:text-green-400" },
-                  { label: "Admin", email: "admin@stairdoc.com", color: "bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30 text-purple-700 dark:text-purple-400" },
-                ].map(({ label, email: demoEmail, color }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setEmail(demoEmail);
-                      setPassword("password123");
-                    }}
-                    className={`rounded-md border px-2 py-2 text-center transition-colors cursor-pointer ${color}`}
-                  >
-                    <div className="text-xs font-semibold">{label}</div>
-                    <div className="text-[10px] opacity-70 truncate">{demoEmail.split("@")[0]}</div>
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-muted-foreground text-center">
-                Dev only — password: <kbd className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">password123</kbd>
-              </p>
-            </div>
-          )}
+
         </form>
       </CardContent>
     </Card>

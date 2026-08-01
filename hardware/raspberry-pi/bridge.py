@@ -21,10 +21,14 @@ Usage:
 
 from __future__ import annotations
 
+import atexit
+import fcntl
 import json
 import os
 import queue
+import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -76,6 +80,19 @@ API_URL = choose_api_url()
 SOCKET_URL = os.getenv("STAIRDOC_SOCKET_URL", API_URL).rstrip("/")
 ROBOT_ID = os.getenv("ROBOT_ID", "robot-001")
 BRIDGE_TOKEN = os.getenv("ROBOT_BRIDGE_TOKEN", "")
+
+# ── Operating mode ────────────────────────────────────────────────────────
+# Set ESP32_ENABLED=false when running alongside the ROS 2 stack
+# (start_nav.sh + ros2_bridge.py). In that mode:
+#   • Serial port is NOT opened (micro_ros_agent owns /dev/sensors/esp32)
+#   • Socket.IO bridge slot is NOT claimed (ros2_bridge.py holds it)
+#   • RFID / Camera / Voice still work via REST API calls
+ESP32_ENABLED = os.getenv("ESP32_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+BRIDGE_MODE = os.getenv("BRIDGE_MODE", "standalone")  # standalone | sensors_only
+
+# Default robot world position (overridden by ros2_bridge.py pose when in ROS2 mode)
+ROBOT_POS_X = float(os.getenv("ROBOT_POS_X", "0.0"))
+ROBOT_POS_Y = float(os.getenv("ROBOT_POS_Y", "0.0"))
 
 ESP32_CONNECTION = os.getenv("ESP32_CONNECTION", "serial")  # serial | bluetooth
 ESP32_SERIAL_PORT = os.getenv("ESP32_SERIAL_PORT", "").strip()
@@ -134,10 +151,10 @@ LOCAL_VOICE_SPEAK_RESPONSE = os.getenv("LOCAL_VOICE_SPEAK_RESPONSE", "false").lo
 }
 
 # GPIO pins (Raspberry Pi BCM) — same as your access control script
-SERVO_PIN = int(os.getenv("SERVO_PIN", "13"))
-RED_LED = int(os.getenv("RED_LED", "17"))
-GREEN_LED = int(os.getenv("GREEN_LED", "27"))
-BUZZER = int(os.getenv("BUZZER", "22"))
+SERVO_PIN = int(os.getenv("SERVO_PIN", "5"))
+RED_LED = int(os.getenv("RED_LED", "4"))
+GREEN_LED = int(os.getenv("GREEN_LED", "17"))
+BUZZER = int(os.getenv("BUZZER", "27"))
 
 NAV_TO_BT = {
     "forward": "f",
@@ -357,7 +374,13 @@ def build_telemetry_payload(bridge: BridgeState, esp_link: Esp32Link | None = No
         "robot_id": ROBOT_ID,
         "status": status,
         "lock_status": bridge.lock_status,
-        "location": {"floor": 1, "building": "Building A", "room": None, "x": 50.0, "y": 50.0},
+        "location": {
+            "floor": int(os.getenv("ROBOT_FLOOR", "1")),
+            "building": os.getenv("ROBOT_BUILDING", "Building A"),
+            "room": os.getenv("ROBOT_ROOM") or None,
+            "x": ROBOT_POS_X,
+            "y": ROBOT_POS_Y,
+        },
         "battery": {"level": 85, "is_charging": False, "voltage": 25.0, "temperature": 30.0},
         "sensors": {
             "obstacle_detected": obstacle,
@@ -416,10 +439,10 @@ class PiPeripherals:
         self._pwm.ChangeDutyCycle(0)
 
     def lock_door(self) -> None:
-        self.set_servo_angle(0)
+        self.set_servo_angle(90)
 
     def unlock_door(self) -> None:
-        self.set_servo_angle(90)
+        self.set_servo_angle(0)
 
     def denied_feedback(self) -> None:
         if not self._gpio_ok:
@@ -435,10 +458,18 @@ class PiPeripherals:
         ts = time.strftime("%Y%m%d-%H%M%S")
         path = PHOTO_DIR / f"access_{tag_id}_{ts}.jpg"
         try:
-            subprocess.run(["rpicam-still", "-o", str(path), "--timeout", "1000"], check=True)
-            return path
+            # Fetch raw JPEG bytes from local camera server
+            resp = requests.get("http://127.0.0.1:8080/photo", timeout=5)
+            if resp.status_code == 200:
+                with path.open("wb") as f:
+                    f.write(resp.content)
+                print(f"[Camera] Saved photo from local stream: {path.name}")
+                return path
+            else:
+                print(f"[Camera] Stream server returned HTTP {resp.status_code}")
+                return None
         except Exception as exc:
-            print(f"[Camera] Capture failed: {exc}")
+            print(f"[Camera] Stream server photo fetch failed: {exc}")
             return None
 
     def upload_photo(self, path: Path, tag_id: str) -> None:
@@ -671,13 +702,80 @@ def voice_recognition_loop(pi: PiPeripherals, bridge: BridgeState) -> None:
 # ── Socket.IO bridge ─────────────────────────────────────────────────────
 
 
+# ── PID lock ─────────────────────────────────────────────────────────────
+
+_PID_LOCK_PATH = Path("/tmp/stairdoc-bridge.pid")
+_pid_lock_file = None  # kept open to hold the flock
+
+
+def _acquire_pid_lock() -> None:
+    """Acquire an exclusive PID lock or exit if another instance is already running."""
+    global _pid_lock_file
+    try:
+        _pid_lock_file = open(_PID_LOCK_PATH, "w")
+        fcntl.flock(_pid_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _pid_lock_file.write(str(os.getpid()))
+        _pid_lock_file.flush()
+
+        def _release() -> None:
+            try:
+                fcntl.flock(_pid_lock_file, fcntl.LOCK_UN)
+                _pid_lock_file.close()
+                _PID_LOCK_PATH.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        atexit.register(_release)
+    except BlockingIOError:
+        existing_pid = _PID_LOCK_PATH.read_text().strip() if _PID_LOCK_PATH.exists() else "unknown"
+        print(
+            f"[PID Lock] Another stairdoc-bridge instance is already running (PID {existing_pid}).\n"
+            f"           Run 'kill {existing_pid}' or 'systemctl stop stairdoc-bridge' first."
+        )
+        sys.exit(1)
+
+
 def run_bridge() -> None:
     import socketio
 
-    esp = Esp32Link()
-    esp.connect()
+    _acquire_pid_lock()
+    mode_label = "STANDALONE" if ESP32_ENABLED else "SENSORS-ONLY (ROS2 mode)"
+    print(f"[Bridge] Mode: {mode_label}  Robot: {ROBOT_ID}")
+
+    esp: Esp32Link | None = None
+    if ESP32_ENABLED:
+        esp = Esp32Link()
+        esp.connect()
+
     pi = PiPeripherals()
     bridge_state = BridgeState()
+
+    # ── SIGTERM handler (systemd stop / kill signal) ───────────────────────
+    _stop_event = threading.Event()
+
+    def _handle_sigterm(signum: int, frame: object) -> None:
+        print("[Bridge] SIGTERM received — shutting down gracefully")
+        _stop_event.set()
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+    signal.signal(signal.SIGINT, _handle_sigterm)
+
+    if not ESP32_ENABLED:
+        # SENSORS-ONLY mode: RFID + Camera + Voice use REST directly.
+        # No Socket.IO bridge slot needed — ros2_bridge.py holds it.
+        print("[Bridge] ESP32_ENABLED=false — RFID/Camera/Voice only (no serial, no Socket.IO)")
+        if pi._reader:
+            threading.Thread(target=pi.rfid_loop, args=(bridge_state,), daemon=True).start()
+        if LOCAL_VOICE_ENABLED:
+            threading.Thread(
+                target=voice_recognition_loop,
+                args=(pi, bridge_state),
+                daemon=True,
+            ).start()
+        print("[Bridge] Sensors-only mode running — waiting for stop signal")
+        _stop_event.wait()  # block until SIGTERM
+        print("[Bridge] Sensors-only mode stopped")
+        return
 
     sio = socketio.Client(reconnection=True, reconnection_attempts=0)
 
@@ -729,7 +827,7 @@ def run_bridge() -> None:
             print(f"[Socket.IO] Backend unavailable: {exc}")
             return False
 
-    # RFID in background
+    # RFID + Voice in background threads
     if pi._reader:
         threading.Thread(target=pi.rfid_loop, args=(bridge_state,), daemon=True).start()
     if LOCAL_VOICE_ENABLED:
@@ -739,9 +837,9 @@ def run_bridge() -> None:
             daemon=True,
         ).start()
 
-    print("[Bridge] Running — Ctrl+C to stop")
+    print("[Bridge] Running — send SIGTERM or Ctrl+C to stop")
     try:
-        while True:
+        while not _stop_event.is_set():
             esp.ensure_connected()
             socket_connected = ensure_socket_connected()
 
@@ -762,13 +860,18 @@ def run_bridge() -> None:
                     else:
                         bridge_state.last_move_command = None
 
-            time.sleep(TELEMETRY_INTERVAL_SEC)
-    except KeyboardInterrupt:
-        print("[Bridge] Stopping")
-        esp.send_bt_char("s")
+            _stop_event.wait(timeout=TELEMETRY_INTERVAL_SEC)
     finally:
+        print("[Bridge] Shutting down")
+        esp.send_bt_char("s")
         if sio.connected:
+            try:
+                sio.emit("bridge_unregister", {"robot_id": ROBOT_ID})
+                time.sleep(0.3)
+            except Exception:
+                pass
             sio.disconnect()
+        print("[Bridge] Stopped cleanly")
 
 
 if __name__ == "__main__":

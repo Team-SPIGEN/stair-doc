@@ -15,16 +15,21 @@ from src.config import settings
 from src.core.bridge import (
     apply_bridge_telemetry,
     build_bridge_command_payload,
+    clear_slam_map,
     get_bridge_lidar,
     get_bridge_map,
     get_bridge_last_seen,
     get_bridge_sid,
     get_bridge_status,
     get_field,
+    get_robot_pose,
+    get_slam_map,
     is_bridge_connected,
     register_bridge,
     clear_bridge_map,
     store_bridge_lidar,
+    store_robot_pose,
+    store_slam_map,
     unregister_bridge,
 )
 from src.core.robot import ROBOT_ID
@@ -267,6 +272,24 @@ async def _telemetry_loop() -> None:
                         "timestamp": datetime.utcnow().isoformat(),
                     })
 
+            # Broadcast SLAM map snapshot if ros2_bridge relay is feeding one
+            slam_map = get_slam_map(ROBOT_ID)
+            if slam_map:
+                await sio.emit("slam_map_update", {
+                    "robot_id": ROBOT_ID,
+                    **slam_map,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+
+            # Broadcast robot world-frame pose (from /amcl_pose or /odom via relay)
+            robot_pose = get_robot_pose(ROBOT_ID)
+            if robot_pose:
+                await sio.emit("robot_pose", {
+                    "robot_id": ROBOT_ID,
+                    **robot_pose,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+
             await sio.emit("nav_status", _build_nav_status_payload(ROBOT_ID))
 
 
@@ -392,6 +415,47 @@ async def bridge_lidar(sid: str, data: dict) -> None:
     points = data.get("points", [])
     if robot_id and get_bridge_sid(robot_id) == sid and points:
         store_bridge_lidar(robot_id, points)
+
+
+@sio.event
+async def slam_map(sid: str, data: dict) -> None:
+    """Ingest a SLAM OccupancyGrid snapshot from the ros2_bridge relay.
+
+    Expected payload keys (from ros2_bridge.py):
+      robot_id        : str
+      width, height   : int   — grid dimensions in cells
+      resolution      : float — metres per cell
+      origin_x, origin_y : float — world-frame origin of grid (metres)
+      obstacle_points : [{angle, distance}] — current /scan in robot frame
+      map_points      : [{x, y}]            — occupied cells in world frame
+      slam_mode       : "mapping" | "localization"
+    """
+    robot_id = get_field(data, "robot_id", "robotId")
+    if not robot_id or get_bridge_sid(robot_id) != sid:
+        return
+    store_slam_map(robot_id, {k: v for k, v in data.items() if k != "robot_id"})
+    print(f"[Socket.IO] SLAM map update: {robot_id} ({data.get('slam_mode', 'unknown')} mode)")
+
+
+@sio.event
+async def bridge_pose(sid: str, data: dict) -> None:
+    """Ingest the robot's world-frame pose from the ros2_bridge relay.
+
+    Expected payload: robot_id, x, y, heading (degrees, 0=east/+x, CCW positive).
+    Emitted from /amcl_pose (localization) or /odom (mapping).
+    """
+    robot_id = get_field(data, "robot_id", "robotId")
+    if not robot_id or get_bridge_sid(robot_id) != sid:
+        return
+    try:
+        store_robot_pose(
+            robot_id,
+            float(data.get("x", 0)),
+            float(data.get("y", 0)),
+            float(data.get("heading", 0)),
+        )
+    except (TypeError, ValueError):
+        pass
 
 
 @sio.event
@@ -600,11 +664,17 @@ async def navigation_command(sid: str, data: dict) -> None:
 
     elif action == "reset_map":
         clear_bridge_map(robot_id)
+        clear_slam_map(robot_id)
         await sio.emit("lidar_map", {
             "robot_id": robot_id,
             "points": [],
             "fov": 360,
             "source": "bridge",
+            "timestamp": now,
+        })
+        await sio.emit("slam_map_update", {
+            "robot_id": robot_id,
+            "cleared": True,
             "timestamp": now,
         })
 

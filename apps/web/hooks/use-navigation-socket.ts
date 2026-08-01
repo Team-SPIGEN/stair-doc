@@ -73,6 +73,42 @@ export interface RobotTelemetryPayload {
   timestamp: string;
 }
 
+// ── SLAM map types ──────────────────────────────────────────────────────
+
+export interface SlamMapPoint {
+  x: number;
+  y: number;
+}
+
+export interface SlamMapData {
+  /** OccupancyGrid width in cells */
+  width: number;
+  /** OccupancyGrid height in cells */
+  height: number;
+  /** Metres per cell */
+  resolution: number;
+  /** World-frame origin of grid (metres) */
+  origin_x: number;
+  origin_y: number;
+  /** Downsampled world-frame obstacle points */
+  map_points?: SlamMapPoint[];
+  /** Current /scan in robot frame ({angle, distance}) */
+  obstacle_points?: LidarPoint[];
+  /** "mapping" | "localization" */
+  slam_mode?: string;
+  /** True when the server cleared the map */
+  cleared?: boolean;
+  timestamp?: string;
+}
+
+export interface RobotPosePayload {
+  robot_id: string;
+  x: number;
+  y: number;
+  heading: number;
+  timestamp: string;
+}
+
 // ── Hook options ────────────────────────────────────────────────────────
 
 interface UseNavigationSocketOptions {
@@ -107,6 +143,10 @@ interface UseNavigationSocketReturn {
   bridgeConnected: boolean;
   /** Latest Raspberry Pi bridge status */
   bridgeStatus: BridgeStatusPayload | null;
+  /** Latest SLAM OccupancyGrid snapshot (null if not streaming) */
+  slamMap: SlamMapData | null;
+  /** Robot world-frame pose from /amcl_pose or /odom (null if not streaming) */
+  robotPose: { x: number; y: number; heading: number } | null;
   /** Send a navigation command via Socket.IO */
   sendNavCommand: (
     action: string,
@@ -137,6 +177,8 @@ export function useNavigationSocket(
   const [isEmergency, setIsEmergency] = useState(false);
   const [robot, setRobot] = useState<RobotStatusResponse | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatusPayload | null>(null);
+  const [slamMap, setSlamMap] = useState<SlamMapData | null>(null);
+  const [robotPose, setRobotPose] = useState<{ x: number; y: number; heading: number } | null>(null);
 
   // Stable callback refs
   const onLidarScanRef = useRef(onLidarScan);
@@ -208,6 +250,18 @@ export function useNavigationSocket(
       setBridgeStatus(data);
     };
 
+    const handleSlamMapUpdate = (data: SlamMapData) => {
+      if (data.cleared) {
+        setSlamMap(null);
+      } else {
+        setSlamMap(data);
+      }
+    };
+
+    const handleRobotPose = (data: RobotPosePayload) => {
+      setRobotPose({ x: data.x, y: data.y, heading: data.heading });
+    };
+
     // Subscribe
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
@@ -219,6 +273,8 @@ export function useNavigationSocket(
     socket.on("robot_telemetry", handleRobotTelemetry);
     socket.on("system_health", handleSystemHealth);
     socket.on("bridge_status", handleBridgeStatus);
+    socket.on("slam_map_update", handleSlamMapUpdate);
+    socket.on("robot_pose", handleRobotPose);
 
     // Connect if not already
     if (!socket.connected) {
@@ -237,6 +293,8 @@ export function useNavigationSocket(
         socket.off("robot_telemetry", handleRobotTelemetry);
         socket.off("system_health", handleSystemHealth);
         socket.off("bridge_status", handleBridgeStatus);
+        socket.off("slam_map_update", handleSlamMapUpdate);
+        socket.off("robot_pose", handleRobotPose);
       };
     }
 
@@ -251,6 +309,8 @@ export function useNavigationSocket(
       socket.off("robot_telemetry", handleRobotTelemetry);
       socket.off("system_health", handleSystemHealth);
       socket.off("bridge_status", handleBridgeStatus);
+      socket.off("slam_map_update", handleSlamMapUpdate);
+      socket.off("robot_pose", handleRobotPose);
     };
   }, [autoConnect]);
 
@@ -285,6 +345,8 @@ export function useNavigationSocket(
     robot,
     bridgeConnected: (bridgeStatus?.connected_count ?? 0) > 0,
     bridgeStatus,
+    slamMap,
+    robotPose,
     sendNavCommand,
   };
 }

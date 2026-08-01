@@ -23,6 +23,10 @@ _bridge_sid_to_robot: dict[str, str] = {}
 _bridge_lidar: dict[str, list[dict[str, float]]] = {}
 # robot_id → accumulated map points from manual exploration / SLAM feed
 _bridge_map: dict[str, list[dict[str, float]]] = {}
+# robot_id → latest SLAM occupancy grid metadata + obstacle points from ros2_bridge
+_bridge_slam_map: dict[str, dict] = {}
+# robot_id → latest robot world pose {x, y, heading} from /amcl_pose or /odom
+_bridge_robot_pose: dict[str, dict[str, float]] = {}
 # robot_id → last telemetry push timestamp
 _bridge_last_seen: dict[str, datetime] = {}
 
@@ -112,6 +116,8 @@ def unregister_bridge(sid: str) -> str | None:
         if _bridge_clients.get(robot_id) == sid:
             _bridge_clients.pop(robot_id, None)
         _bridge_lidar.pop(robot_id, None)
+        _bridge_slam_map.pop(robot_id, None)
+        _bridge_robot_pose.pop(robot_id, None)
         _bridge_last_seen.pop(robot_id, None)
     return robot_id
 
@@ -285,3 +291,35 @@ def build_bridge_command_payload(
     if extra:
         payload.update(extra)
     return payload
+
+
+# ── SLAM map helpers ─────────────────────────────────────────────────────
+
+
+def store_slam_map(robot_id: str, slam_data: dict[str, Any]) -> None:
+    """Store the latest SLAM occupancy grid snapshot from the ros2_bridge relay.
+
+    Expected slam_data keys:
+      width, height, resolution, origin_x, origin_y  — OccupancyGrid metadata
+      obstacle_points — list of {angle, distance} in robot frame (already downsampled)
+      map_points      — optional list of {x, y} in world frame obstacles
+    """
+    _bridge_slam_map[robot_id] = slam_data
+    _bridge_last_seen[robot_id] = datetime.now(UTC)
+
+
+def get_slam_map(robot_id: str) -> dict[str, Any] | None:
+    return _bridge_slam_map.get(robot_id)
+
+
+def clear_slam_map(robot_id: str) -> None:
+    _bridge_slam_map.pop(robot_id, None)
+
+
+def store_robot_pose(robot_id: str, x: float, y: float, heading: float) -> None:
+    """Store the latest robot world-frame pose from /amcl_pose or /odom."""
+    _bridge_robot_pose[robot_id] = {"x": x, "y": y, "heading": heading}
+
+
+def get_robot_pose(robot_id: str) -> dict[str, float] | None:
+    return _bridge_robot_pose.get(robot_id)

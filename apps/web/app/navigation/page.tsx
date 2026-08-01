@@ -42,6 +42,8 @@ import {
   ArrowRight,
   RotateCcw,
   Cpu,
+  Map,
+  ScanLine,
 } from "lucide-react";
 import { Joystick } from "@/components/navigation/joystick";
 import { LidarViz } from "@/components/navigation/lidar-viz";
@@ -129,7 +131,49 @@ export default function NavigationPage() {
     robot,
     bridgeConnected,
     sendNavCommand,
+    slamMap,
+    robotPose,
   } = useNavigationSocket();
+
+  // Map view mode toggle
+  const [mapMode, setMapMode] = useState<"scan" | "slam">("scan");
+
+  // Static pre-built map (fallback when live SLAM is not streaming)
+  const [staticMap, setStaticMap] = useState<{
+    imageDataUri: string;
+    width: number;
+    height: number;
+    resolution: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/map/static")
+      .then((r) => r.ok ? r.json() : null)
+      .then((json) => {
+        if (json?.data) {
+          setStaticMap({
+            imageDataUri: json.data.image_data_uri,
+            width: json.data.width,
+            height: json.data.height,
+            resolution: json.data.resolution,
+            originX: json.data.origin_x,
+            originY: json.data.origin_y,
+          });
+        }
+      })
+      .catch(() => null);
+  }, []);
+
+  // Auto-switch to SLAM view when live data starts arriving
+  const prevSlamRef = useRef<typeof slamMap>(null);
+  useEffect(() => {
+    if (slamMap && !prevSlamRef.current) {
+      setMapMode("slam");
+    }
+    prevSlamRef.current = slamMap;
+  }, [slamMap]);
 
   const repeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -519,13 +563,44 @@ export default function NavigationPage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <Radio className="h-4 w-4" />
-              LIDAR Visualization
+              {mapMode === "slam" ? "SLAM Map" : "LIDAR Scan"}
             </CardTitle>
             <CardDescription className="text-xs">
-              Real-time 2D map • {(mapPoints.length || lidarPoints.length)} points • {lidarFov}° FOV
+              {mapMode === "slam"
+                ? slamMap
+                  ? `Live SLAM · ${slamMap.slam_mode ?? "mapping"} · ${slamMap.map_points?.length ?? 0} cells`
+                  : staticMap
+                    ? "Pre-built map (start ros2_bridge for live SLAM)"
+                    : "No map data — start ros2_bridge on the Pi"
+                : `Real-time scan · ${(mapPoints.length || lidarPoints.length)} pts · ${lidarFov}° FOV`}
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-1 items-center justify-center p-4">
+          <CardContent className="flex flex-1 flex-col items-center gap-3 p-4">
+            {/* View toggle */}
+            <div className="flex w-full gap-2">
+              <Button
+                size="sm"
+                variant={mapMode === "scan" ? "default" : "outline"}
+                className="flex-1 gap-1.5"
+                onClick={() => setMapMode("scan")}
+              >
+                <ScanLine className="h-3.5 w-3.5" />
+                Live Scan
+              </Button>
+              <Button
+                size="sm"
+                variant={mapMode === "slam" ? "default" : "outline"}
+                className="flex-1 gap-1.5"
+                onClick={() => setMapMode("slam")}
+              >
+                <Map className="h-3.5 w-3.5" />
+                SLAM Map
+                {slamMap && (
+                  <span className="ml-1 h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+              </Button>
+            </div>
+
             <LidarViz
               points={mapPoints.length ? mapPoints : lidarPoints}
               fov={lidarFov}
@@ -535,8 +610,17 @@ export default function NavigationPage() {
                   ? autoResponse.path.map((w) => ({ x: w.x / 20 - 2.5, y: w.y / 20 - 2.5 }))
                   : undefined
               }
-              size={360}
+              size={340}
               maxRange={6}
+              slamMap={slamMap}
+              robotPose={robotPose}
+              mapMode={mapMode}
+              staticMapDataUri={staticMap?.imageDataUri}
+              staticMapWidth={staticMap?.width}
+              staticMapHeight={staticMap?.height}
+              staticMapResolution={staticMap?.resolution}
+              staticMapOriginX={staticMap?.originX}
+              staticMapOriginY={staticMap?.originY}
             />
           </CardContent>
           <div className="border-t px-4 pb-4">
