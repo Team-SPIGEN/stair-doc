@@ -82,13 +82,21 @@ ROBOT_ID = os.getenv("ROBOT_ID", "robot-001")
 BRIDGE_TOKEN = os.getenv("ROBOT_BRIDGE_TOKEN", "")
 
 # ── Operating mode ────────────────────────────────────────────────────────
-# Set ESP32_ENABLED=false when running alongside the ROS 2 stack
-# (start_nav.sh + ros2_bridge.py). In that mode:
-#   • Serial port is NOT opened (micro_ros_agent owns /dev/sensors/esp32)
-#   • Socket.IO bridge slot is NOT claimed (ros2_bridge.py holds it)
-#   • RFID / Camera / Voice still work via REST API calls
-ESP32_ENABLED = os.getenv("ESP32_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-BRIDGE_MODE = os.getenv("BRIDGE_MODE", "standalone")  # standalone | sensors_only
+# UART ESP motor control is DISABLED. Manual + Autonomous use micro_ros_agent
+# + ros2_bridge.py (/cmd_vel + NavigateToPose). Exactly one owner of
+# /dev/sensors/esp32 — never open this port from bridge.py.
+#
+# This script in production = sensors-only: RFID, door GPIO, camera, voice.
+# Set ESP32_ENABLED=true is ignored (refused) to prevent serial conflicts.
+_ESP32_REQUESTED = os.getenv("ESP32_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+if _ESP32_REQUESTED:
+    print(
+        "[Bridge] ESP32_ENABLED=true ignored — UART motor bridge is removed. "
+        "Use micro_ros_agent + ros2_bridge for Manual /cmd_vel. "
+        "Continuing in sensors-only mode (RFID/camera/voice)."
+    )
+ESP32_ENABLED = False  # hard-disabled: never open ESP serial
+BRIDGE_MODE = os.getenv("BRIDGE_MODE", "sensors_only")  # sensors_only only
 
 # Default robot world position (overridden by ros2_bridge.py pose when in ROS2 mode)
 ROBOT_POS_X = float(os.getenv("ROBOT_POS_X", "0.0"))
@@ -803,16 +811,13 @@ def run_bridge() -> None:
 
     @sio.on("bridge_command")
     def on_bridge_command(data: dict) -> None:
+        # Unreachable in sensors-only mode (Socket.IO not claimed).
+        # Kept as a hard refuse if someone re-enables UART later by mistake.
         action = data.get("action", "")
-        bt = data.get("bt_command") or NAV_TO_BT.get(action)
-        if bt:
-            sent = esp.send_bt_char(bt)
-            if sent and bt in ("f", "b", "l", "r"):
-                bridge_state.last_move_command = bt
-                bridge_state.last_move_time = time.time()
-            elif bt == "s" or not sent:
-                bridge_state.last_move_command = None
-        print(f"[Bridge] Command: {action} → {bt}")
+        print(
+            f"[Bridge] REFUSED UART command {action!r} — "
+            "Manual drive is ROS /cmd_vel via ros2_bridge only."
+        )
 
     last_socket_attempt = 0.0
 

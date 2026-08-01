@@ -6,6 +6,7 @@ Forwards navigation/robot commands to the bridge for ESP32 Bluetooth control.
 """
 
 import asyncio
+import math
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +32,16 @@ from src.core.bridge import (
     store_robot_pose,
     store_slam_map,
     unregister_bridge,
+)
+from src.core.locations import find_location, normalize_destination
+from src.core.nav_state import (
+    autonomous_reject_message,
+    enter_autonomous,
+    enter_emergency,
+    enter_idle,
+    enter_manual,
+    get_nav_state,
+    manual_reject_message,
 )
 from src.core.robot import ROBOT_ID
 from src.core.robot_state import get_robot, get_robots
@@ -75,28 +86,12 @@ _system_health: dict[str, Any] = {
 # Background task reference
 _telemetry_task: asyncio.Task | None = None
 
-# ── Navigation State ─────────────────────────────────────────────────────
-
-_nav_state: dict[str, dict[str, Any]] = {
-    ROBOT_ID: {
-        "mode": "idle",
-        "target_floor": None,
-        "target_location": None,
-        "progress": 0.0,
-        "eta_seconds": None,
-        "current_speed": 0.0,
-        "emergency": False,
-        "heading": 0.0,
-    },
-}
+# ── Navigation State (shared with REST via src.core.nav_state) ───────────
 
 
 def _build_nav_status_payload(robot_id: str) -> dict[str, Any]:
     """Build navigation status event payload."""
-    state = _nav_state.get(
-        robot_id,
-        {"mode": "idle", "target_floor": None, "progress": 0.0, "emergency": False},
-    )
+    state = get_nav_state(robot_id)
     return {
         "robot_id": robot_id,
         "mode": state["mode"],
@@ -105,7 +100,7 @@ def _build_nav_status_payload(robot_id: str) -> dict[str, Any]:
         "progress": round(state["progress"], 3),
         "eta_seconds": state.get("eta_seconds"),
         "current_speed": state.get("current_speed", 0.0),
-        "emergency_active": state["emergency"],
+        "emergency_active": bool(state.get("emergency_active")),
         "heading": state.get("heading", 0.0),
         "timestamp": datetime.utcnow().isoformat(),
     }
@@ -144,6 +139,11 @@ def _build_telemetry_payload(robot: dict[str, Any]) -> dict[str, Any]:
             "esp32_connected": robot.get("esp32_connected", False),
             "esp32_port": robot.get("esp32_port"),
             "esp32_connection": robot.get("esp32_connection"),
+            "ros2_ready": robot.get("ros2_ready", False),
+            "nav2_ready": robot.get("nav2_ready", False),
+            "micro_ros_agent": robot.get("micro_ros_agent", False),
+            "amcl_ready": robot.get("amcl_ready", False),
+            "slam_mode": robot.get("slam_mode"),
         },
         "speed": robot["speed"],
         "stairs_climbed": robot["stairs_climbed"],
@@ -179,6 +179,7 @@ async def _forward_to_bridge(
     *,
     speed: float = 0.5,
     target_floor: int | None = None,
+    extra: dict | None = None,
 ) -> list[str]:
     """Forward a command to the connected Pi bridge. Returns robot IDs sent."""
     sent: list[str] = []
@@ -186,7 +187,7 @@ async def _forward_to_bridge(
     sid = get_bridge_sid(rid)
     if sid:
         payload = build_bridge_command_payload(
-            action, rid, speed=speed, target_floor=target_floor
+            action, rid, speed=speed, target_floor=target_floor, extra=extra
         )
         await sio.emit("bridge_command", payload, to=sid)
         sent.append(rid)
@@ -194,13 +195,8 @@ async def _forward_to_bridge(
 
 
 def _motor_controller_ready(robot_id: str) -> bool:
-    """Return False when a live bridge has no ESP32 motor serial link."""
-    if not get_bridge_sid(robot_id):
-        return True
-    robot = get_robot()
-    if robot_id != robot["id"]:
-        return False
-    return bool(robot.get("esp32_connected", False))
+    """True when ros2_bridge holds the Socket.IO slot (Manual+Auto via ROS)."""
+    return bool(get_bridge_sid(robot_id))
 
 
 async def _reject_navigation_command(
@@ -466,26 +462,7 @@ async def robot_command(sid: str, data: dict) -> None:
     print(f"[Socket.IO] Command from {sid}: {action} → {robot_id or 'all'}")
 
     if action == "emergency_stop":
-        state = _nav_state.setdefault(
-            robot_id or ROBOT_ID,
-            {
-                "mode": "idle",
-                "target_floor": None,
-                "target_location": None,
-                "progress": 0.0,
-                "eta_seconds": None,
-                "current_speed": 0.0,
-                "emergency": False,
-                "heading": 0.0,
-            },
-        )
-        state["mode"] = "emergency"
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["progress"] = 0.0
-        state["eta_seconds"] = None
-        state["current_speed"] = 0.0
-        state["emergency"] = True
+        enter_emergency(robot_id or ROBOT_ID)
 
         robot = get_robot()
         if not robot_id or robot_id == robot["id"]:
@@ -503,26 +480,10 @@ async def robot_command(sid: str, data: dict) -> None:
         await _forward_to_bridge(robot_id, "emergency_stop")
 
     elif action == "resume":
-        state = _nav_state.setdefault(
-            robot_id or ROBOT_ID,
-            {
-                "mode": "idle",
-                "target_floor": None,
-                "target_location": None,
-                "progress": 0.0,
-                "eta_seconds": None,
-                "current_speed": 0.0,
-                "emergency": False,
-                "heading": 0.0,
-            },
-        )
-        state["mode"] = "idle"
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["progress"] = 0.0
-        state["eta_seconds"] = None
-        state["current_speed"] = 0.0
-        state["emergency"] = False
+        rid = robot_id or ROBOT_ID
+        state = get_nav_state(rid)
+        state["emergency_active"] = False
+        enter_idle(rid)
 
         robot = get_robot()
         if (not robot_id or robot_id == robot["id"]) and robot["status"] == RobotStatus.EMERGENCY:
@@ -551,36 +512,16 @@ async def robot_command(sid: str, data: dict) -> None:
 async def navigation_command(sid: str, data: dict) -> None:
     """Handle real-time navigation commands from the frontend.
 
-    Supports manual joystick commands and autonomous mode toggle.
-    Broadcasts nav_status updates to all connected clients.
-    Forwards movement commands to the Pi bridge for ESP32 control.
+    Manual Twist and Autonomous NavigateToPose are hard-separated via shared
+    nav_state — cross-mode commands are rejected (no silent mode overwrite).
     """
     action = data.get("action", "")
     robot_id = get_field(data, "robot_id", "robotId", default="robot-001")
     now = datetime.utcnow().isoformat()
-
-    state = _nav_state.get(robot_id)
-    if state is None:
-        _nav_state[robot_id] = {
-            "mode": "idle",
-            "target_floor": None,
-            "target_location": None,
-            "progress": 0.0,
-            "eta_seconds": None,
-            "current_speed": 0.0,
-            "emergency": False,
-            "heading": 0.0,
-        }
-        state = _nav_state[robot_id]
+    state = get_nav_state(robot_id)
 
     if action == "emergency_stop":
-        state["mode"] = "emergency"
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["emergency"] = True
-        state["progress"] = 0.0
-        state["eta_seconds"] = None
-        state["current_speed"] = 0.0
+        enter_emergency(robot_id)
         for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["status"] = RobotStatus.EMERGENCY
@@ -589,13 +530,8 @@ async def navigation_command(sid: str, data: dict) -> None:
         await _forward_to_bridge(robot_id, "emergency_stop")
 
     elif action == "reset_estop":
-        state["mode"] = "idle"
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["progress"] = 0.0
-        state["eta_seconds"] = None
-        state["current_speed"] = 0.0
-        state["emergency"] = False
+        state["emergency_active"] = False
+        enter_idle(robot_id)
         for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["status"] = RobotStatus.IDLE
@@ -603,64 +539,109 @@ async def navigation_command(sid: str, data: dict) -> None:
         await sio.emit("emergency_active", {"robot_id": robot_id, "active": False, "timestamp": now})
         await _forward_to_bridge(robot_id, "stop")
 
-    elif action == "autonomous":
-        if not _motor_controller_ready(robot_id):
+    elif action in ("autonomous", "navigate_to"):
+        reject = autonomous_reject_message(state)
+        if reject:
+            await _reject_navigation_command(sid, action, robot_id, reject)
+            return
+
+        target_floor = get_field(data, "target_floor", "targetFloor", default=0)
+        raw_location = get_field(data, "target_location", "targetLocation")
+        goal = get_field(data, "goal") or {}
+        destination = normalize_destination(raw_location)
+
+        if not goal and destination:
+            room = find_location(destination)
+            if room is None:
+                await _reject_navigation_command(
+                    sid,
+                    action,
+                    robot_id,
+                    f"Unknown destination {destination!r}. Check maps/locations.json.",
+                )
+                return
+            goal = {
+                "x": room.x,
+                "y": room.y,
+                "yaw": room.yaw,
+                "heading": math.degrees(room.yaw),
+                "frame_id": room.frame_id,
+            }
+            destination = room.id
+
+        if not goal and not destination:
             await _reject_navigation_command(
                 sid,
                 action,
                 robot_id,
-                "ESP32 motor controller is not connected.",
+                "Destination is required for autonomous navigation.",
             )
             return
-        target_floor = get_field(data, "target_floor", "targetFloor", default=1)
-        state["mode"] = "autonomous"
-        state["target_floor"] = target_floor
-        state["target_location"] = get_field(data, "target_location", "targetLocation")
-        state["progress"] = 0.0
-        state["eta_seconds"] = get_field(data, "eta_seconds", "etaSeconds")
-        state["current_speed"] = float(data.get("speed", 0.7))
-        state["emergency"] = False
-        await _forward_to_bridge(robot_id, "autonomous", target_floor=int(target_floor))
+
+        if not get_bridge_sid(robot_id):
+            await _reject_navigation_command(
+                sid,
+                action,
+                robot_id,
+                "Pi ROS bridge is offline. Start ros2_bridge (micro_ros_agent + Nav2).",
+            )
+            return
+
+        enter_autonomous(
+            robot_id,
+            target_floor=target_floor,
+            target_location=destination or goal.get("room_id"),
+            eta_seconds=get_field(data, "eta_seconds", "etaSeconds"),
+            speed=float(data.get("speed", 0.4)),
+        )
+        await _forward_to_bridge(
+            robot_id,
+            "navigate_to",
+            speed=float(data.get("speed", 0.4)),
+            target_floor=int(target_floor) if target_floor is not None else None,
+            extra={
+                "target_location": destination,
+                "targetLocation": destination,
+                "goal": goal,
+            },
+        )
 
     elif action in ("forward", "backward", "left", "right"):
+        reject = manual_reject_message(state)
+        if reject:
+            await _reject_navigation_command(sid, action, robot_id, reject)
+            return
         if not _motor_controller_ready(robot_id):
             await _reject_navigation_command(
                 sid,
                 action,
                 robot_id,
-                "ESP32 motor controller is not connected.",
+                "ROS relay offline. Start micro_ros_agent + ros2_bridge for Manual /cmd_vel.",
             )
             return
-        state["mode"] = "manual"
-        state["emergency"] = False
         speed = data.get("speed", 0.5)
-        state["current_speed"] = float(speed)
+        enter_manual(robot_id, speed=float(speed))
         for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["speed"] = speed
         await _forward_to_bridge(robot_id, action, speed=float(speed))
 
     elif action == "stop":
-        state["mode"] = "idle"
-        state["current_speed"] = 0.0
-        state["target_floor"] = None
-        state["target_location"] = None
-        state["eta_seconds"] = None
+        # Always allowed: cancel Nav2 + zero /cmd_vel + idle
+        enter_idle(robot_id)
         for robot in get_robots():
             if robot["id"] == robot_id:
                 robot["speed"] = 0.0
         await _forward_to_bridge(robot_id, "stop")
 
     elif action in ("front_servo_up", "front_servo_down", "rear_servo_up", "rear_servo_down"):
-        if not _motor_controller_ready(robot_id):
-            await _reject_navigation_command(
-                sid,
-                action,
-                robot_id,
-                "ESP32 motor controller is not connected.",
-            )
-            return
-        await _forward_to_bridge(robot_id, action)
+        await _reject_navigation_command(
+            sid,
+            action,
+            robot_id,
+            "Servo sweeps need a ROS servo API (Coming soon). UART bridge motor path is disabled.",
+        )
+        return
 
     elif action == "reset_map":
         clear_bridge_map(robot_id)
@@ -678,10 +659,7 @@ async def navigation_command(sid: str, data: dict) -> None:
             "timestamp": now,
         })
 
-    # Broadcast updated nav status
     await sio.emit("nav_status", _build_nav_status_payload(robot_id))
-
-    # Acknowledge
     await sio.emit("command_ack", {
         "action": f"nav_{action}",
         "robot_id": robot_id,

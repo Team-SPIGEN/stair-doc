@@ -36,6 +36,14 @@ def _assert_envelope(body: dict, *, success: bool = True) -> dict:
 async def _reset_state(ac: AsyncClient, robot_id: str = "robot-001"):
     """Helper to reset the robot's nav state to idle by resetting estop
     (if active) then sending a stop command."""
+    # Clear any test-registered Pi bridge so manual ESP32 checks stay clean
+    from src.core import bridge as bridge_mod
+    from src.core.nav_state import force_reset
+
+    bridge_mod._bridge_clients.clear()
+    bridge_mod._bridge_sid_to_robot.clear()
+    force_reset(robot_id)
+
     # Try to reset estop — ignore 400 (not active)
     await ac.post(f"/api/v1/navigation/reset-estop?robot_id={robot_id}")
     # Send stop to go idle
@@ -208,30 +216,22 @@ async def test_command_default_speed():
 
 
 @pytest.mark.anyio
-async def test_autonomous_start():
-    """Starting autonomous navigation returns ETA and path."""
+async def test_autonomous_requires_destination():
+    """Missing Destination returns 422."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         await _reset_state(ac)
         resp = await ac.post(
             "/api/v1/navigation/autonomous",
-            json={"robot_id": "robot-001", "target_floor": 3},
+            json={"robot_id": "robot-001", "target_floor": 0},
         )
 
-    assert resp.status_code == 200
-    data = _assert_envelope(resp.json())
-    assert data["success"] is True
-    assert data["robot_id"] == "robot-001"
-    assert data["target_floor"] == 3
-    assert data["eta_seconds"] > 0
-    assert len(data["eta_display"]) > 0
-    assert isinstance(data["path"], list)
-    assert len(data["path"]) >= 2  # at least start + destination
+    assert resp.status_code == 422
 
 
 @pytest.mark.anyio
-async def test_autonomous_with_location():
-    """Autonomous navigation with a target location includes it in the path."""
+async def test_autonomous_unknown_destination():
+    """Unknown room returns 404 and does not start navigation."""
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         await _reset_state(ac)
@@ -239,17 +239,106 @@ async def test_autonomous_with_location():
             "/api/v1/navigation/autonomous",
             json={
                 "robot_id": "robot-001",
-                "target_floor": 5,
-                "target_location": "Room 501",
+                "target_floor": 0,
+                "target_location": "No Such Room XYZ",
+            },
+        )
+
+    assert resp.status_code == 404
+    assert "Unknown destination" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_autonomous_pi_offline():
+    """Known room with no Pi bridge returns 503."""
+    from src.core import bridge as bridge_mod
+
+    # Ensure no bridge is registered
+    bridge_mod._bridge_clients.clear()
+    bridge_mod._bridge_sid_to_robot.clear()
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        resp = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={
+                "robot_id": "robot-001",
+                "target_location": "IDS Lab",
+            },
+        )
+
+    assert resp.status_code == 503
+    assert "ROS relay" in resp.json()["detail"] or "ros2_bridge" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_autonomous_start():
+    """Known Destination with a registered Pi bridge returns Nav2 goal."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        ok, _ = register_bridge("test-sid-autonomous", "robot-001", None)
+        assert ok
+        resp = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={
+                "robot_id": "robot-001",
+                "target_floor": 0,
+                "target_location": "ids_lab",
             },
         )
 
     assert resp.status_code == 200
     data = _assert_envelope(resp.json())
-    assert data["target_location"] == "Room 501"
-    # Last waypoint should be the target location
-    last_wp = data["path"][-1]
-    assert last_wp["label"] == "Room 501"
+    assert data["success"] is True
+    assert data["robot_id"] == "robot-001"
+    assert data["target_location"] == "ids_lab"
+    assert data["goal"]["room_id"] == "ids_lab"
+    assert data["goal"]["x"] == pytest.approx(21.425)
+    assert data["goal"]["y"] == pytest.approx(7.835)
+    assert data["eta_seconds"] > 0
+    assert isinstance(data["path"], list)
+    assert len(data["path"]) >= 1
+
+
+@pytest.mark.anyio
+async def test_autonomous_with_alias():
+    """Alias match (case-insensitive) resolves to the same room."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-alias", "robot-001", None)
+        resp = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={
+                "robot_id": "robot-001",
+                "target_location": "  IDS Lab  ",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = _assert_envelope(resp.json())
+    assert data["goal"]["room_id"] == "ids_lab"
+    assert data["target_location"] == "IDS Lab"
+
+
+@pytest.mark.anyio
+async def test_locations_catalog():
+    """GET /navigation/locations returns the rooms catalog."""
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/navigation/locations")
+
+    assert resp.status_code == 200
+    data = _assert_envelope(resp.json())
+    assert data["count"] >= 1
+    ids = {r["id"] for r in data["rooms"]}
+    assert "ids_lab" in ids
 
 
 @pytest.mark.anyio
@@ -266,7 +355,7 @@ async def test_autonomous_blocked_during_emergency():
         # Try autonomous — should fail
         resp = await ac.post(
             "/api/v1/navigation/autonomous",
-            json={"robot_id": "robot-001", "target_floor": 3},
+            json={"robot_id": "robot-001", "target_location": "IDS Lab"},
         )
 
     assert resp.status_code == 409
@@ -279,7 +368,11 @@ async def test_autonomous_invalid_floor():
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post(
             "/api/v1/navigation/autonomous",
-            json={"robot_id": "robot-001", "target_floor": 99},
+            json={
+                "robot_id": "robot-001",
+                "target_floor": 99,
+                "target_location": "home",
+            },
         )
 
     assert resp.status_code == 422
@@ -348,20 +441,23 @@ async def test_status_reflects_manual_mode():
 @pytest.mark.anyio
 async def test_status_reflects_autonomous_mode():
     """After starting autonomous nav, status shows autonomous mode."""
+    from src.core.bridge import register_bridge
+
     transport = ASGITransport(app=_app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         await _reset_state(ac)
+        register_bridge("test-sid-status-auto", "robot-001", None)
         await ac.post(
             "/api/v1/navigation/autonomous",
-            json={"robot_id": "robot-001", "target_floor": 4},
+            json={"robot_id": "robot-001", "target_location": "home"},
         )
         resp = await ac.get("/api/v1/navigation/status?robot_id=robot-001")
 
     assert resp.status_code == 200
     data = _assert_envelope(resp.json())
     assert data["mode"] == "autonomous"
-    assert data["target_floor"] == 4
-    assert data["progress"] == 0.0
+    assert data["target_location"] == "home"
+    assert data["progress"] == pytest.approx(0.05)
 
 
 @pytest.mark.anyio
@@ -444,6 +540,169 @@ async def test_reset_estop_allows_commands_again():
 
 
 @pytest.mark.anyio
+async def test_manual_rejected_while_autonomous():
+    """Manual Twist returns 409 while Autonomous mode is active."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-manual-vs-auto", "robot-001", None)
+        await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+        resp = await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "forward", "robot_id": "robot-001"},
+        )
+
+    assert resp.status_code == 409
+    assert "Autonomous" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_autonomous_rejected_while_manual():
+    """Autonomous start returns 409 while Manual mode is active."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-auto-vs-manual", "robot-001", None)
+        await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "forward", "speed": 0.4, "robot_id": "robot-001"},
+        )
+        resp = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+
+    assert resp.status_code == 409
+    assert "Manual" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_second_autonomous_rejected_until_stop():
+    """A second Nav2 goal is 409 until Stop clears the first."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-second-goal", "robot-001", None)
+        first = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+        assert first.status_code == 200
+        second = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "ids_lab"},
+        )
+        assert second.status_code == 409
+
+        await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "stop", "robot_id": "robot-001"},
+        )
+        again = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "ids_lab"},
+        )
+        assert again.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_stop_clears_autonomous_then_manual_works():
+    """Stop → idle; Manual drive works again after Autonomous."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-stop-clear", "robot-001", None)
+        await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+        stop = await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "stop", "robot_id": "robot-001"},
+        )
+        assert stop.status_code == 200
+        status = await ac.get("/api/v1/navigation/status?robot_id=robot-001")
+        assert _assert_envelope(status.json())["mode"] == "idle"
+
+        fwd = await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "forward", "robot_id": "robot-001"},
+        )
+        assert fwd.status_code == 200
+        assert _assert_envelope(fwd.json())["command"] == "forward"
+
+
+@pytest.mark.anyio
+async def test_mode_enter_manual_blocks_autonomous():
+    """POST /mode manual arms Manual; Autonomous start is 409 until Exit."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-mode-manual", "robot-001", None)
+        mode = await ac.post(
+            "/api/v1/navigation/mode",
+            json={"robot_id": "robot-001", "mode": "manual"},
+        )
+        assert mode.status_code == 200
+        assert _assert_envelope(mode.json())["mode"] == "manual"
+
+        auto = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+        assert auto.status_code == 409
+
+        exit_mode = await ac.post(
+            "/api/v1/navigation/mode",
+            json={"robot_id": "robot-001", "mode": "idle"},
+        )
+        assert exit_mode.status_code == 200
+        assert _assert_envelope(exit_mode.json())["mode"] == "idle"
+
+
+@pytest.mark.anyio
+async def test_mode_arm_autonomous_then_start():
+    """Enter Autonomous arms mode; Start Destination then succeeds; Manual 409."""
+    from src.core.bridge import register_bridge
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-mode-auto", "robot-001", None)
+        arm = await ac.post(
+            "/api/v1/navigation/mode",
+            json={"robot_id": "robot-001", "mode": "autonomous"},
+        )
+        assert arm.status_code == 200
+        assert _assert_envelope(arm.json())["mode"] == "autonomous"
+
+        fwd = await ac.post(
+            "/api/v1/navigation/command",
+            json={"command": "forward", "robot_id": "robot-001"},
+        )
+        assert fwd.status_code == 409
+
+        start = await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+        assert start.status_code == 200
+
+
+@pytest.mark.anyio
 async def test_full_lifecycle():
     """Complete lifecycle: idle → manual → autonomous → emergency → reset → idle."""
     transport = ASGITransport(app=_app)
@@ -472,9 +731,12 @@ async def test_full_lifecycle():
         assert _assert_envelope(resp.json())["mode"] == "idle"
 
         # 4. Autonomous
+        from src.core.bridge import register_bridge
+
+        register_bridge("test-sid-lifecycle", robot, None)
         await ac.post(
             "/api/v1/navigation/autonomous",
-            json={"robot_id": robot, "target_floor": 2},
+            json={"robot_id": robot, "target_location": "home"},
         )
         resp = await ac.get(f"/api/v1/navigation/status?robot_id={robot}")
         status = _assert_envelope(resp.json())
@@ -496,3 +758,29 @@ async def test_full_lifecycle():
         status = _assert_envelope(resp.json())
         assert status["mode"] == "idle"
         assert status["emergency_active"] is False
+
+
+@pytest.mark.anyio
+async def test_forged_socket_manual_rejected_while_autonomous():
+    """Socket Manual does not overwrite Autonomous (shared nav_state reject)."""
+    from src.core.bridge import register_bridge
+    from src.core.nav_state import get_nav_state, manual_reject_message
+    from src.core import nav_state as nav_state_mod
+    from src.schemas.navigation import NavigationMode
+
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        await _reset_state(ac)
+        register_bridge("test-sid-forged", "robot-001", None)
+        await ac.post(
+            "/api/v1/navigation/autonomous",
+            json={"robot_id": "robot-001", "target_location": "home"},
+        )
+
+    state = get_nav_state("robot-001")
+    assert state["mode"] == NavigationMode.AUTONOMOUS.value
+    msg = manual_reject_message(state)
+    assert msg is not None
+    assert "Autonomous" in msg
+    # Prove REST and Socket share the same dict
+    assert nav_state_mod._nav_state["robot-001"] is state

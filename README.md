@@ -157,23 +157,79 @@ print('Private:', v.private_key)
 
 See **[hardware/INTEGRATION.md](hardware/INTEGRATION.md)** for the complete wiring guide.
 
+### Destination autonomous navigation
+
+The Navigation page **Autonomous Mode** sends Nav2 goals by Destination name — not floor, and **not** over UART.
+
+1. Enter a **Destination** (room id or alias from [`maps/locations.json`](maps/locations.json)).
+2. The API looks up map-frame `x`, `y`, `yaw` (radians), case-insensitive on `id` + `aliases`.
+3. If unknown → clear UI/API error; **no goal is sent**.
+4. If known and the Pi `ros2_bridge` is registered → API emits `navigate_to` with the pose → Pi calls Nav2 `NavigateToPose`.
+
+```json
+{
+  "rooms": [
+    {
+      "id": "ids_lab",
+      "aliases": ["IDS Lab", "ids lab"],
+      "x": 21.425,
+      "y": 7.835,
+      "yaw": 0.0,
+      "frame_id": "map",
+      "map": "stairbot_room_map"
+    }
+  ]
+}
+```
+
+Copy `maps/locations.json` to `~/maps/locations.json` on the Pi (or set `STAIRDOC_LOCATIONS_FILE`). Floor selection is disabled (Coming soon).
+
+### Manual drive via `/cmd_vel` (same ROS stack)
+
+Joystick / WASD / arrows publish `geometry_msgs/Twist` on `/cmd_vel` through:
+
+`Web → Socket.IO → ros2_bridge.py → /cmd_vel → micro_ros_agent → ESP`
+
+- Max-speed slider scales Twist magnitude; release / idle / E-Stop publish zero Twist.
+- E-Stop also cancels any active Nav2 goal.
+- **Servo sweeps** are disabled in UI (Coming soon — no ROS servo API). Door unlock servo on the Pi GPIO still works via sensors-only companion.
+
+### Operator note — one stack for Manual + Auto
+
+```bash
+# On the Pi (required for BOTH Manual and Destination):
+bash ~/stairbot_firmware/start_nav.sh          # micro_ros_agent on /dev/sensors/esp32
+bash ~/stairbot_firmware/start_ros2_bridge.sh localization
+# or: sudo systemctl start stairdoc-ros2-bridge
+```
+
+Do **not** start UART `stairdoc-bridge` against the ESP port. Switching Manual ↔ Autonomous does not require restarting the agent.
+
+### UART ESP motor bridge — disabled (evidence)
+
+| Former call site | Replacement |
+|------------------|-------------|
+| `bridge.py` serial `f/b/l/r/s` for joystick | `ros2_bridge` → `/cmd_vel` |
+| `NAV_TO_BT` / `bt_command` on drive actions | Omitted from API payloads |
+| UI “ESP32 serial / Pi Bridge” motor gate | ROS relay + micro-ROS status |
+| Servo UI `u/d/v/e` over UART | Disabled — Coming soon (needs ROS servo API) |
+| `stairdoc-bridge.service` (UART motor) | Disabled by `install_service.sh` |
+
+**Not removed (blocker):** `bridge.py` **sensors-only** (`ESP32_ENABLED=false`) still runs RFID RC522, door GPIO servo, camera upload, optional Vosk. It never opens `/dev/sensors/esp32`. Full deletion of `bridge.py` would break those features until they are rehosted.
+
 ### Quick start
 
 ```bash
 # 1. Run API + PWA (see Getting Started above)
 
-# 2. Flash the ESP32
-# Open hardware/esp32/stairdoc_robot_usb_bt/stairdoc_robot_usb_bt.ino
-# in Arduino IDE and flash it to the ESP32.
+# 2. On the Raspberry Pi — ROS stack (Manual + Destination)
+#    bash start_nav.sh && bash start_ros2_bridge.sh localization
 
-# 3. On the Raspberry Pi
-cd hardware/raspberry-pi
-cp .env.example .env   # set STAIRDOC_API_URLS to the Mac/API IP
-pip install -r requirements.txt
-python bridge.py
+# 3. Optional sensors-only (RFID/camera) — never opens ESP serial
+#    sudo systemctl start stairdoc-ros2-sensors
 ```
 
-The Pi bridge registers via Socket.IO, forwards navigation commands to the ESP32, and pushes live telemetry to the app.
+The Pi bridge registers via Socket.IO, forwards navigation commands, and pushes live telemetry to the app.
 
 ### Socket.IO events
 

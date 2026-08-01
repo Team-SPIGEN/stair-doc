@@ -3,7 +3,8 @@
  *
  * Typed fetch wrapper for navigation control endpoints:
  *   POST /navigation/command      — manual joystick
- *   POST /navigation/autonomous   — start autonomous nav
+ *   POST /navigation/autonomous   — start Destination Nav2 goal
+ *   GET  /navigation/locations    — named rooms catalog
  *   GET  /navigation/status       — current nav status
  *   POST /navigation/reset-estop  — clear emergency stop
  */
@@ -31,8 +32,19 @@ export interface ManualCommandRequest {
 
 export interface AutonomousRequest {
   robot_id?: string;
-  target_floor: number;
-  target_location?: string;
+  /** Floor is unused for now (coming soon). */
+  target_floor?: number;
+  /** Required room / Destination name (id or alias from locations.json). */
+  target_location: string;
+}
+
+export interface NavGoalPose {
+  x: number;
+  y: number;
+  yaw: number;
+  frame_id: string;
+  room_id: string;
+  map: string;
 }
 
 export interface CommandResponse {
@@ -48,10 +60,27 @@ export interface AutonomousResponse {
   robot_id: string;
   target_floor: number;
   target_location: string | null;
+  goal?: NavGoalPose | null;
   eta_seconds: number;
   eta_display: string;
-  path: Array<{ x: number; y: number; floor: number; label: string }>;
+  path: Array<{ x: number; y: number; floor: number; label: string; yaw?: number }>;
+  message?: string;
   timestamp: string;
+}
+
+export interface LocationRoom {
+  id: string;
+  aliases: string[];
+  x: number;
+  y: number;
+  yaw: number;
+  frame_id: string;
+  map: string;
+}
+
+export interface LocationsResponse {
+  rooms: LocationRoom[];
+  count: number;
 }
 
 export interface NavigationStatusResponse {
@@ -103,8 +132,14 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
+    const detail =
+      typeof body?.detail === "string"
+        ? body.detail
+        : Array.isArray(body?.detail)
+          ? body.detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join("; ")
+          : body?.message;
     throw new ApiError(
-      body?.detail ?? body?.message ?? `Request failed: ${response.status}`,
+      detail ?? `Request failed: ${response.status}`,
       response.status,
       body,
     );
@@ -134,7 +169,7 @@ export async function sendNavigationCommand(
 }
 
 /**
- * Start autonomous navigation to a target floor/location.
+ * Start autonomous navigation to a named Destination (Nav2 via ros2_bridge).
  */
 export async function startAutonomousNavigation(
   body: AutonomousRequest,
@@ -143,6 +178,13 @@ export async function startAutonomousNavigation(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * List named Destinations from maps/locations.json.
+ */
+export async function fetchLocations(): Promise<LocationsResponse> {
+  return apiFetch<LocationsResponse>("/api/v1/navigation/locations");
 }
 
 /**
@@ -166,4 +208,18 @@ export async function resetEmergencyStop(
     `/api/v1/navigation/reset-estop?robot_id=${encodeURIComponent(robotId)}`,
     { method: "POST" },
   );
+}
+
+/**
+ * Enter or exit a navigation mode (hub Enter Manual / Enter Autonomous / Exit).
+ * Enter Autonomous arms the mode but does not start a Nav2 goal.
+ */
+export async function setNavigationMode(
+  mode: Exclude<NavigationMode, "emergency">,
+  robotId = "robot-001",
+): Promise<NavigationStatusResponse> {
+  return apiFetch<NavigationStatusResponse>("/api/v1/navigation/mode", {
+    method: "POST",
+    body: JSON.stringify({ robot_id: robotId, mode }),
+  });
 }

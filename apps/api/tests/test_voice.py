@@ -10,8 +10,22 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+def _reset_nav() -> None:
+    """Clear shared nav mode so voice navigate tests start from idle."""
+    from src.core.nav_state import force_reset
+
+    force_reset("robot-001")
+
+
 @pytest.mark.asyncio
 async def test_voice_navigate_floor():
+    from src.core.bridge import register_bridge
+    from src.core import bridge as bridge_mod
+
+    _reset_nav()
+    bridge_mod._bridge_clients.clear()
+    bridge_mod._bridge_sid_to_robot.clear()
+    register_bridge("test-sid-voice-nav", "robot-001", None)
     async with _client() as client:
         response = await client.post(
             "/api/v1/voice/command",
@@ -69,6 +83,13 @@ async def test_voice_recipient_blocked_from_navigation():
 @pytest.mark.asyncio
 async def test_voice_navigate_word_floor():
     """Word-spelled floor ('three') must map to integer 3."""
+    from src.core.bridge import register_bridge
+    from src.core import bridge as bridge_mod
+
+    _reset_nav()
+    bridge_mod._bridge_clients.clear()
+    bridge_mod._bridge_sid_to_robot.clear()
+    register_bridge("test-sid-voice-word", "robot-001", None)
     async with _client() as client:
         response = await client.post(
             "/api/v1/voice/command",
@@ -106,6 +127,13 @@ async def test_voice_floor_out_of_range():
 @pytest.mark.asyncio
 async def test_voice_return_home():
     """'Return home' should navigate robot to floor 1 / base station."""
+    from src.core.bridge import register_bridge
+    from src.core import bridge as bridge_mod
+
+    _reset_nav()
+    bridge_mod._bridge_clients.clear()
+    bridge_mod._bridge_sid_to_robot.clear()
+    register_bridge("test-sid-voice-home", "robot-001", None)
     async with _client() as client:
         response = await client.post(
             "/api/v1/voice/command",

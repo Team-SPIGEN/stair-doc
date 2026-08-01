@@ -34,6 +34,15 @@ export interface SensorsResponse {
   esp32_connected: boolean;
   esp32_port: string | null;
   esp32_connection: string | null;
+  /** True when ros2_bridge is publishing telemetry */
+  ros2_ready?: boolean;
+  /** True when NavigateToPose action client initialised */
+  nav2_ready?: boolean;
+  /** True when micro_ros_agent process detected on Pi */
+  micro_ros_agent?: boolean;
+  /** True when /amcl_pose has been received */
+  amcl_ready?: boolean;
+  slam_mode?: string | null;
 }
 
 export type RobotStatusType =

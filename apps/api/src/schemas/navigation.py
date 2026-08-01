@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class NavigationCommand(str, Enum):
@@ -46,13 +46,50 @@ class ManualCommandRequest(BaseModel):
 
 
 class AutonomousRequest(BaseModel):
-    """Body for POST /navigation/autonomous."""
+    """Body for POST /navigation/autonomous.
+
+    Destination (room name / id / alias) is required. Floor is optional and
+    currently unused (multi-floor coming soon).
+    """
 
     robot_id: str = Field("robot-001", description="Target robot ID")
-    target_floor: int = Field(..., ge=0, le=20, description="Destination floor")
-    target_location: Optional[str] = Field(
-        None, max_length=100, description="Room or landmark name"
+    target_floor: int = Field(
+        0,
+        ge=0,
+        le=20,
+        description="Destination floor (coming soon — ignored for Nav2 goals)",
     )
+    target_location: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Room / destination name (matched against maps/locations.json)",
+    )
+
+    @field_validator("target_location")
+    @classmethod
+    def _trim_location(cls, value: str) -> str:
+        cleaned = " ".join(str(value).split())
+        if not cleaned:
+            raise ValueError("Destination is required")
+        return cleaned
+
+
+class ModeSwitchRequest(BaseModel):
+    """Body for POST /navigation/mode — hub Enter/Exit mode buttons."""
+
+    robot_id: str = Field("robot-001", description="Target robot ID")
+    mode: NavigationMode = Field(
+        ...,
+        description="Target mode: manual, autonomous, or idle (exit). Emergency via E-stop only.",
+    )
+
+    @field_validator("mode")
+    @classmethod
+    def _allowed_modes(cls, value: NavigationMode) -> NavigationMode:
+        if value == NavigationMode.EMERGENCY:
+            raise ValueError("Use emergency_stop / reset-estop; cannot set emergency via /mode")
+        return value
 
 
 # ── Response schemas ─────────────────────────────────────────────────────
@@ -68,6 +105,17 @@ class CommandResponse(BaseModel):
     timestamp: datetime
 
 
+class NavGoalPose(BaseModel):
+    """Resolved map-frame Nav2 goal."""
+
+    x: float
+    y: float
+    yaw: float = Field(..., description="Yaw in radians")
+    frame_id: str = "map"
+    room_id: str
+    map: str = "stairbot_room_map"
+
+
 class AutonomousResponse(BaseModel):
     """Response for starting autonomous navigation."""
 
@@ -75,9 +123,11 @@ class AutonomousResponse(BaseModel):
     robot_id: str
     target_floor: int
     target_location: Optional[str] = None
+    goal: Optional[NavGoalPose] = None
     eta_seconds: int = Field(0, ge=0, description="Estimated time of arrival in seconds")
     eta_display: str = Field("", description="Human-readable ETA")
     path: list[dict] = Field(default_factory=list, description="Waypoint path")
+    message: str = Field("", description="Human-readable status (e.g. Nav2 goal accepted)")
     timestamp: datetime
 
 

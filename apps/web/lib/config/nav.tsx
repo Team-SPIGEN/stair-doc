@@ -86,9 +86,9 @@ export const navConfig: NavConfig = {
       iconMobile: <Icons.gamepad className="h-5 w-5" />,
       label: "Navigation",
       href: "/navigation",
-      pageTitle: "Navigation Controls",
+      pageTitle: "Navigation",
       navLocation: "top",
-      // Visible for demo/manual control access.
+      // Visible for demo/manual control access. Sub-routes: /manual, /autonomous.
     },
     {
       icon: <Icons.settings className="h-5 w-5" />,

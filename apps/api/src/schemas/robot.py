@@ -53,6 +53,12 @@ class SensorsResponse(BaseModel):
     esp32_connected: bool = False
     esp32_port: Optional[str] = None
     esp32_connection: Optional[str] = None
+    # ROS 2 / Nav2 readiness (populated by ros2_bridge telemetry)
+    ros2_ready: bool = False
+    nav2_ready: bool = False
+    micro_ros_agent: bool = False
+    amcl_ready: bool = False
+    slam_mode: Optional[str] = None
 
 
 class RobotStatusResponse(BaseModel):

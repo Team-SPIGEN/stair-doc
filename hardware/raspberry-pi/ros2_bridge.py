@@ -62,13 +62,60 @@ import socketio  # python-socketio[asyncio]
 # ── Config ────────────────────────────────────────────────────────────────
 API_URL         = os.getenv("STAIRDOC_API_URL", "http://localhost:8000").rstrip("/")
 BRIDGE_TOKEN    = os.getenv("ROBOT_BRIDGE_TOKEN", "")
-ROBOT_ID        = os.getenv("ROBOT_ID", "stairbot-001")
+ROBOT_ID        = os.getenv("ROBOT_ID", "robot-001")
 MAP_POINTS_MAX  = int(os.getenv("MAP_POINTS_MAX", "2000"))
 SCAN_RATE_HZ    = float(os.getenv("SCAN_RATE_HZ", "5"))
 MAP_RATE_HZ     = float(os.getenv("MAP_RATE_HZ", "1"))
+# Named Destinations for NavigateToPose (same schema as maps/locations.json)
+_LOCATIONS_CANDIDATES = [
+    os.getenv("STAIRDOC_LOCATIONS_FILE", "").strip(),
+    str(Path(__file__).parent / "locations.json"),
+    str(Path.home() / "maps" / "locations.json"),
+    "/home/spigen/maps/locations.json",
+]
 
 SCAN_INTERVAL = 1.0 / SCAN_RATE_HZ
 MAP_INTERVAL  = 1.0 / MAP_RATE_HZ
+
+# ── Locations catalog ─────────────────────────────────────────────────────
+_locations_by_key: dict[str, dict[str, Any]] = {}
+
+
+def _load_locations() -> None:
+    """Load maps/locations.json (id + aliases → x,y,yaw radians)."""
+    global _locations_by_key
+    _locations_by_key = {}
+    path = next((p for p in _LOCATIONS_CANDIDATES if p and Path(p).exists()), None)
+    if not path:
+        print(
+            "[ros2_bridge] No locations.json found — Destination lookup disabled. "
+            "Copy maps/locations.json to ~/maps/ or set STAIRDOC_LOCATIONS_FILE."
+        )
+        return
+    try:
+        import json
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        for room in raw.get("rooms") or []:
+            entry = {
+                "id": str(room["id"]),
+                "x": float(room["x"]),
+                "y": float(room["y"]),
+                "yaw": float(room.get("yaw", 0.0)),
+                "frame_id": str(room.get("frame_id", "map")),
+            }
+            keys = [entry["id"].lower()]
+            for alias in room.get("aliases") or []:
+                keys.append(str(alias).strip().lower())
+            for key in keys:
+                if key:
+                    _locations_by_key[key] = entry
+        print(f"[ros2_bridge] Loaded {len(raw.get('rooms') or [])} rooms from {path}")
+    except Exception as exc:
+        print(f"[ros2_bridge] Failed to load locations from {path}: {exc}")
+
+
+def _resolve_location(name: str) -> dict[str, Any] | None:
+    return _locations_by_key.get(str(name).strip().lower())
 
 # ── PID lock ──────────────────────────────────────────────────────────────
 _PID_LOCK_PATH = Path("/tmp/ros2-bridge.pid")
@@ -116,6 +163,10 @@ _shutdown = asyncio.Event()
 _ros_node     = None
 _cmd_vel_pub  = None
 _nav_client   = None
+_nav_goal_handle = None  # latest NavigateToPose goal handle (for cancel)
+_nav_goal_active = False  # True while a Nav2 goal is outstanding
+_nav2_ready   = False
+_micro_ros_ok = False
 
 
 # ── Socket.IO client ──────────────────────────────────────────────────────
@@ -146,9 +197,23 @@ async def disconnect() -> None:
     print("[ros2_bridge] Disconnected from API (will reconnect)")
 
 
+def _publish_zero_twist() -> None:
+    """Publish a zero Twist once to clear lingering Manual /cmd_vel."""
+    if _cmd_vel_pub is None:
+        return
+    from geometry_msgs.msg import Twist  # type: ignore[import]
+
+    _cmd_vel_pub.publish(Twist())
+
+
 @sio.event
 async def bridge_command(data: dict) -> None:
-    """Forward navigation commands from the PWA to ROS 2 /cmd_vel or Nav2."""
+    """Forward navigation commands from the PWA to ROS 2 /cmd_vel or Nav2.
+
+    Defense in depth: refuse Manual Twist while a Nav2 goal is active;
+    refuse a second navigate_to until stop; zero Twist before Nav2 goals.
+    """
+    global _nav_goal_active
     action = data.get("action", "")
     speed  = float(data.get("speed", 0.3))
     print(f"[ros2_bridge] bridge_command: {action!r}  speed={speed}")
@@ -157,46 +222,86 @@ async def bridge_command(data: dict) -> None:
         print("[ros2_bridge] ROS 2 not ready — command ignored")
         return
 
+    if action in ("stop", "emergency_stop"):
+        await _cancel_nav_goal()
+        _nav_goal_active = False
+        _publish_zero_twist()
+        print(f"[ros2_bridge] {action}: Nav2 cancelled + cmd_vel zeroed")
+        return
+
     if action == "navigate_to":
-        goal = data.get("goal", {})
+        if _nav_goal_active:
+            print(
+                "[ros2_bridge] REFUSE navigate_to — Nav2 goal already active. "
+                "Send stop before a new Destination."
+            )
+            return
+        goal = data.get("goal") or {}
+        # Prefer yaw (radians). Fall back to heading (degrees) for legacy clients.
+        if "yaw" in goal and goal["yaw"] is not None:
+            yaw_rad = float(goal["yaw"])
+        else:
+            yaw_rad = math.radians(float(goal.get("heading", 0)))
+        label = data.get("target_location") or data.get("room_id") or "goal"
+        print(
+            f"[ros2_bridge] navigate_to {label!r} -> "
+            f"({goal.get('x')}, {goal.get('y')}) yaw={yaw_rad:.3f} rad"
+        )
+        # Clear any lingering Manual Twist before Nav2 takes /cmd_vel
+        _publish_zero_twist()
         await _send_nav_goal(
             float(goal.get("x", 0)),
             float(goal.get("y", 0)),
-            float(goal.get("heading", 0)),
+            yaw_rad,
+            frame_id=str(goal.get("frame_id", "map")),
         )
         return
 
     if action == "autonomous":
-        target_location = data.get("target_location", "Destination")
-        # Map location strings to metric coordinates in world-frame
-        # Customize these to match your actual room setup / map scale!
-        location_map = {
-            "start":       (0.0, 0.0, 0.0),
-            "corridor":    (1.5, 0.0, 0.0),
-            "stairwell":   (2.5, 1.0, 90.0),
-            "elevator":    (-1.0, 2.0, 180.0),
-            "lobby":       (0.5, -1.0, 270.0),
-            "destination": (1.0, 1.0, 0.0),
-        }
-        loc_key = str(target_location).lower().strip()
-        gx, gy, gyaw = location_map.get(loc_key, location_map["destination"])
-        print(f"[ros2_bridge] Autonomous navigation to location {target_location!r} -> ({gx}, {gy})")
-        await _send_nav_goal(gx, gy, gyaw)
+        if _nav_goal_active:
+            print(
+                "[ros2_bridge] REFUSE autonomous — Nav2 goal already active. "
+                "Send stop before a new Destination."
+            )
+            return
+        # Fallback path: resolve Destination on the Pi if API did not send a goal
+        target_location = data.get("target_location") or data.get("targetLocation") or ""
+        room = _resolve_location(str(target_location))
+        if room is None:
+            print(
+                f"[ros2_bridge] Unknown destination {target_location!r} — "
+                "refusing Nav2 goal (edit locations.json)"
+            )
+            return
+        print(
+            f"[ros2_bridge] Autonomous {target_location!r} -> "
+            f"({room['x']}, {room['y']}) yaw={room['yaw']:.3f}"
+        )
+        _publish_zero_twist()
+        await _send_nav_goal(room["x"], room["y"], room["yaw"], frame_id=room["frame_id"])
         return
 
-    from geometry_msgs.msg import Twist  # type: ignore[import]
-    twist = Twist()
-    if action == "forward":
-        twist.linear.x = speed
-    elif action == "backward":
-        twist.linear.x = -speed
-    elif action == "left":
-        twist.angular.z = speed * 2.0
-    elif action == "right":
-        twist.angular.z = -speed * 2.0
-    # stop / emergency_stop → zero twist (default)
+    if action in ("forward", "backward", "left", "right"):
+        if _nav_goal_active:
+            print(
+                f"[ros2_bridge] REFUSE {action} — Nav2 goal active "
+                "(Manual and Autonomous cannot share /cmd_vel)"
+            )
+            return
+        from geometry_msgs.msg import Twist  # type: ignore[import]
+        twist = Twist()
+        if action == "forward":
+            twist.linear.x = speed
+        elif action == "backward":
+            twist.linear.x = -speed
+        elif action == "left":
+            twist.angular.z = speed * 2.0
+        elif action == "right":
+            twist.angular.z = -speed * 2.0
+        _cmd_vel_pub.publish(twist)
+        return
 
-    _cmd_vel_pub.publish(twist)
+    print(f"[ros2_bridge] Unknown action {action!r} — ignored")
 
 
 # ── ROS 2 topic callbacks (called from rclpy spin in a thread) ────────────
@@ -295,8 +400,30 @@ def _odom_callback(msg: Any) -> None:
     }
 
 
-async def _send_nav_goal(x: float, y: float, heading_deg: float) -> None:
-    """Send a NavigateToPose goal to Nav2 (fire-and-forget)."""
+async def _cancel_nav_goal() -> None:
+    """Cancel the active NavigateToPose goal if any."""
+    global _nav_goal_handle, _nav_goal_active
+    handle = _nav_goal_handle
+    _nav_goal_handle = None
+    _nav_goal_active = False
+    if handle is None:
+        return
+    try:
+        handle.cancel_goal_async()
+        print("[ros2_bridge] Nav2 goal cancel requested")
+    except Exception as exc:
+        print(f"[ros2_bridge] Nav2 cancel error: {exc}")
+
+
+async def _send_nav_goal(
+    x: float,
+    y: float,
+    yaw_rad: float,
+    *,
+    frame_id: str = "map",
+) -> None:
+    """Send a NavigateToPose goal to Nav2 (yaw in radians)."""
+    global _nav_goal_handle, _nav_goal_active
     if _nav_client is None:
         print("[ros2_bridge] Nav2 action client not ready — goal ignored")
         return
@@ -304,19 +431,63 @@ async def _send_nav_goal(x: float, y: float, heading_deg: float) -> None:
         from nav2_msgs.action import NavigateToPose  # type: ignore[import]
         from geometry_msgs.msg import PoseStamped    # type: ignore[import]
 
+        if not _nav_client.server_is_ready():
+            print("[ros2_bridge] Waiting for navigate_to_pose action server…")
+            ready = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _nav_client.wait_for_server(timeout_sec=5.0)
+            )
+            if not ready:
+                print("[ros2_bridge] Nav2 action server not available — goal not sent")
+                return
+
         goal_msg  = NavigateToPose.Goal()
         ps        = PoseStamped()
-        ps.header.frame_id = "map"
+        ps.header.frame_id = frame_id or "map"
         ps.pose.position.x = x
         ps.pose.position.y = y
-        yaw = math.radians(heading_deg)
-        ps.pose.orientation.z = math.sin(yaw / 2)
-        ps.pose.orientation.w = math.cos(yaw / 2)
+        ps.pose.orientation.z = math.sin(yaw_rad / 2.0)
+        ps.pose.orientation.w = math.cos(yaw_rad / 2.0)
         goal_msg.pose = ps
 
-        asyncio.ensure_future(_nav_client.send_goal_async(goal_msg))
-        print(f"[ros2_bridge] Nav2 goal sent: ({x:.2f}, {y:.2f}) hdg={heading_deg:.1f}°")
+        # Mark active as soon as we submit so Manual Twist is refused immediately
+        _nav_goal_active = True
+
+        def _on_goal_response(fut: Any) -> None:
+            global _nav_goal_handle, _nav_goal_active
+            try:
+                goal_handle = fut.result()
+                if not goal_handle.accepted:
+                    _nav_goal_active = False
+                    print("[ros2_bridge] Nav2 goal REJECTED by action server")
+                    return
+                _nav_goal_handle = goal_handle
+                print(
+                    f"[ros2_bridge] Nav2 goal ACCEPTED: ({x:.3f}, {y:.3f}) "
+                    f"yaw={yaw_rad:.3f} rad frame={frame_id}"
+                )
+
+                def _on_result(result_fut: Any) -> None:
+                    global _nav_goal_handle, _nav_goal_active
+                    _nav_goal_active = False
+                    _nav_goal_handle = None
+                    try:
+                        result = result_fut.result()
+                        status = getattr(result, "status", None)
+                        print(f"[ros2_bridge] Nav2 goal finished (status={status})")
+                    except Exception as exc:
+                        print(f"[ros2_bridge] Nav2 result error: {exc}")
+
+                result_future = goal_handle.get_result_async()
+                result_future.add_done_callback(_on_result)
+            except Exception as exc:
+                _nav_goal_active = False
+                print(f"[ros2_bridge] Nav2 goal response error: {exc}")
+
+        send_future = _nav_client.send_goal_async(goal_msg)
+        send_future.add_done_callback(_on_goal_response)
+        print(f"[ros2_bridge] Nav2 goal submitted: ({x:.3f}, {y:.3f}) yaw={yaw_rad:.3f}")
     except Exception as exc:
+        _nav_goal_active = False
         print(f"[ros2_bridge] Nav2 goal error: {exc}")
 
 
@@ -335,7 +506,7 @@ def _check_micro_ros_agent() -> bool:
 
 def _init_ros(slam_mode: str, max_retries: int = 5) -> Any:
     """Initialise rclpy with retry logic (agent may not be ready yet)."""
-    global _ros_node, _cmd_vel_pub, _nav_client
+    global _ros_node, _cmd_vel_pub, _nav_client, _nav2_ready
     import rclpy                                                            # type: ignore[import]
     from rclpy.node import Node                                             # type: ignore[import]
     from sensor_msgs.msg import LaserScan                                   # type: ignore[import]
@@ -371,8 +542,10 @@ def _init_ros(slam_mode: str, max_retries: int = 5) -> Any:
         from rclpy.action import ActionClient       # type: ignore[import]
         from nav2_msgs.action import NavigateToPose  # type: ignore[import]
         _nav_client = ActionClient(node, NavigateToPose, "navigate_to_pose")
+        _nav2_ready = True
         print("[ros2_bridge] Nav2 action client ready")
     except Exception as exc:
+        _nav2_ready = False
         print(f"[ros2_bridge] Nav2 not available ({exc}) — navigate_to goal disabled")
 
     print(
@@ -427,13 +600,22 @@ async def _emit_map_loop(slam_mode: str) -> None:
         if pose:
             try:
                 await sio.emit("bridge_pose", {"robot_id": ROBOT_ID, **pose})
-                # Also push to telemetry so the dashboard shows live x/y
+                # Also push to telemetry so the dashboard shows live x/y + ROS readiness
                 await sio.emit("bridge_telemetry", {
                     "robot_id": ROBOT_ID,
                     "location": {"x": pose["x"], "y": pose["y"]},
                     "sensors":  {
-                        "esp32_connected": True,
-                        "weight_kg": _latest_weight_kg,
+                        "esp32_connected": _micro_ros_ok,
+                        "esp32_connection": "micro-ros",
+                        "esp32_port": "micro_ros_agent",
+                    },
+                    "ros2": {
+                        "ready": True,
+                        "nav2_ready": _nav2_ready,
+                        "micro_ros_agent": _micro_ros_ok,
+                        "amcl_ready": _latest_amcl_pose is not None,
+                        "slam_mode": slam_mode,
+                        "cmd_vel": True,
                     },
                 })
             except Exception as exc:
@@ -481,13 +663,19 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────
 
 async def _main(slam_mode: str) -> None:
+    global _micro_ros_ok
     print(f"[ros2_bridge] Starting  robot={ROBOT_ID}  mode={slam_mode}  api={API_URL}")
 
+    _load_locations()
+
     # Warn if micro_ros_agent is not detected
-    if not _check_micro_ros_agent():
+    _micro_ros_ok = _check_micro_ros_agent()
+    if not _micro_ros_ok:
         print(
             "[ros2_bridge] WARNING: micro_ros_agent not detected. "
             "ESP32 /cmd_vel will not reach the hardware. "
+            "Autonomy requires micro_ros_agent on /dev/sensors/esp32 "
+            "(do NOT run UART bridge.py against the same port). "
             "Run 'bash ~/stairbot_firmware/start_nav.sh' first."
         )
 
